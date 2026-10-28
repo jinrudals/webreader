@@ -20,11 +20,12 @@ enum class Destination(val label: String) { Browser("Browser"), Library("Library
 
 class MainActivity : ComponentActivity() {
     private var destination by mutableStateOf(Destination.Browser)
-    private var browserUrl by mutableStateOf<String?>(null)
+    private var openRequest by mutableStateOf<OpenRequest?>(null)
+    private var nextRequestId = 0L
 
     /** Entry point for Library (Task 8): show [url] in the Browser tab. */
     fun openInBrowser(url: String) {
-        browserUrl = url
+        openRequest = OpenRequest(url, ++nextRequestId)
         destination = Destination.Browser
     }
 
@@ -51,7 +52,7 @@ class MainActivity : ComponentActivity() {
                     // Browser stays composed so the WebView and its history survive tab switches.
                     val vm: BrowserViewModel = viewModel(factory = BrowserViewModel.Factory(container))
                     BrowserScreen(
-                        url = browserUrl,
+                        request = openRequest,
                         viewModel = vm,
                         container = container,
                         visible = destination == Destination.Browser,

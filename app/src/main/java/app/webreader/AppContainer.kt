@@ -7,6 +7,7 @@ import app.webreader.data.db.AppDatabase
 import app.webreader.domain.PageClassifier
 import app.webreader.domain.SiteConfig
 import app.webreader.domain.UrlKeyer
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,7 +25,10 @@ import java.io.File
 /** Manual wiring. Lambdas handed to the WebView path read volatile snapshots and never block. */
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val appScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default +
+            CoroutineExceptionHandler { _, e -> android.util.Log.e("AppContainer", "appScope failure", e) },
+    )
 
     val database: AppDatabase = AppDatabase.build(appContext)
     val settings = SettingsStore(appContext)
@@ -52,7 +56,7 @@ class AppContainer(context: Context) {
     val keyer = UrlKeyer(siteConfig)
 
     val resourceCache = ResourceCache(
-        File(appContext.filesDir, "resource-cache"),
+        File(appContext.noBackupFilesDir, "resource-cache"),
         { cacheLimitBytes },
         { protectedKeys },
     )

@@ -92,4 +92,15 @@ class SettingsViewModelTest {
         vm.saveCache(-5, true)
         assertEquals(1, settings.cacheLimitMb.first())
     }
+
+    @Test
+    fun changingBaseAddsOldHostToAliases() = runTest {
+        assertTrue(vm.saveBaseUrl("https://Old.Example/").isSuccess)
+        assertEquals(emptySet<String>(), settings.siteConfig.first().aliasHosts)
+        settings.setAliasHosts(setOf("keep.example", "new.example"))
+        assertTrue(vm.saveBaseUrl("HTTPS://New.Example/x").isSuccess)
+        val c = settings.siteConfig.first()
+        assertEquals("https://new.example/x", c.baseUrl)
+        assertEquals(setOf("keep.example", "old.example"), c.aliasHosts)
+    }
 }

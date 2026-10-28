@@ -34,11 +34,14 @@ import app.webreader.domain.PageType
 import app.webreader.web.CachingWebViewClient
 import kotlinx.coroutines.launch
 
+/** Each Library tap creates a new request so reopening the same URL still navigates. */
+data class OpenRequest(val url: String, val id: Long)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserScreen(
-    url: String?,
+    request: OpenRequest?,
     viewModel: BrowserViewModel,
     container: AppContainer,
     visible: Boolean,
@@ -54,7 +57,8 @@ fun BrowserScreen(
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var currentUrl by remember { mutableStateOf(url ?: baseUrl) }
+    var currentUrl by remember { mutableStateOf(request?.url ?: baseUrl) }
+    var handledRequestId by remember { mutableStateOf(request?.id) }
     var title by remember { mutableStateOf("") }
     var canGoBack by remember { mutableStateOf(false) }
     val webView = remember { arrayOfNulls<WebView>(1) }
@@ -121,14 +125,13 @@ fun BrowserScreen(
                     webViewClient = client
                     setOnScrollChangeListener { _, _, y, _, _ -> tracker.onScroll(y) }
                     webView[0] = this
-                    tag = currentUrl
                     loadUrl(currentUrl)
                 }
             },
             update = { wv ->
-                if (url != null && url != wv.tag) {
-                    wv.tag = url
-                    wv.loadUrl(url)
+                if (request != null && request.id != handledRequestId) {
+                    handledRequestId = request.id
+                    wv.loadUrl(request.url)
                 }
             },
         )

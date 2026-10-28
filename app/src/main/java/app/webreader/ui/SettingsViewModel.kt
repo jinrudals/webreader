@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
@@ -39,12 +40,20 @@ class SettingsViewModel(
 
     suspend fun saveBaseUrl(url: String): Result<Unit> {
         val trimmed = url.trim()
-        val valid = runCatching {
-            val uri = URI(trimmed)
-            uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank()
-        }.getOrDefault(false)
-        if (!valid) return Result.failure(IllegalArgumentException("Enter a valid http(s) URL"))
-        settings.setBaseUrl(trimmed)
+        val uri = runCatching { URI(trimmed) }.getOrNull()
+        val scheme = uri?.scheme?.lowercase()
+        val host = uri?.host?.lowercase()
+        if (scheme !in setOf("http", "https") || host.isNullOrBlank()) {
+            return Result.failure(IllegalArgumentException("Enter a valid http(s) URL"))
+        }
+        val rest = trimmed.substring(trimmed.indexOf("://") + 3)
+        val normalized = "$scheme://" + rest.replaceFirst(Regex(Regex.escape(uri!!.host), RegexOption.IGNORE_CASE), host)
+        val config = settings.siteConfig.first()
+        val oldHost = runCatching { URI(config.baseUrl).host }.getOrNull()?.lowercase()
+        if (!oldHost.isNullOrBlank() && oldHost != host) {
+            settings.setAliasHosts((config.aliasHosts + oldHost).map { it.lowercase() }.toSet() - host)
+        }
+        settings.setBaseUrl(normalized)
         return Result.success(Unit)
     }
 

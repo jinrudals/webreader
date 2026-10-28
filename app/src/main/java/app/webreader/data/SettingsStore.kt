@@ -11,16 +11,26 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import app.webreader.domain.SiteConfig
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.emptyPreferences
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import java.io.IOException
 import kotlinx.coroutines.flow.map
 
 class SettingsStore(context: Context, dataStoreName: String = "settings") {
     private val dataStore: DataStore<Preferences> =
-        PreferenceDataStoreFactory.create {
+        PreferenceDataStoreFactory.create(
+            corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+        ) {
             context.applicationContext.preferencesDataStoreFile(dataStoreName)
         }
 
-    val siteConfig: Flow<SiteConfig> = dataStore.data.map {
+    private val safeData: Flow<Preferences> = dataStore.data.catch {
+        if (it is IOException) emit(emptyPreferences()) else throw it
+    }
+
+    val siteConfig: Flow<SiteConfig> = safeData.map {
         SiteConfig(it[BASE_URL] ?: "", it[ALIAS_HOSTS] ?: emptySet())
     }
 
@@ -32,8 +42,8 @@ class SettingsStore(context: Context, dataStoreName: String = "settings") {
         dataStore.edit { it[ALIAS_HOSTS] = hosts }
     }
 
-    val seriesPattern: Flow<String> = dataStore.data.map { it[SERIES_PATTERN] ?: "" }
-    val episodePattern: Flow<String> = dataStore.data.map { it[EPISODE_PATTERN] ?: "" }
+    val seriesPattern: Flow<String> = safeData.map { it[SERIES_PATTERN] ?: "" }
+    val episodePattern: Flow<String> = safeData.map { it[EPISODE_PATTERN] ?: "" }
 
     suspend fun setPatterns(series: String, episode: String): Result<Unit> {
         val check = runCatching {
@@ -48,13 +58,13 @@ class SettingsStore(context: Context, dataStoreName: String = "settings") {
         return Result.success(Unit)
     }
 
-    val cacheLimitMb: Flow<Int> = dataStore.data.map { it[CACHE_LIMIT_MB] ?: DEFAULT_CACHE_LIMIT_MB }
+    val cacheLimitMb: Flow<Int> = safeData.map { it[CACHE_LIMIT_MB] ?: DEFAULT_CACHE_LIMIT_MB }
 
     suspend fun setCacheLimitMb(mb: Int) {
         dataStore.edit { it[CACHE_LIMIT_MB] = mb }
     }
 
-    val protectFavorites: Flow<Boolean> = dataStore.data.map { it[PROTECT_FAVORITES] ?: true }
+    val protectFavorites: Flow<Boolean> = safeData.map { it[PROTECT_FAVORITES] ?: true }
 
     suspend fun setProtectFavorites(v: Boolean) {
         dataStore.edit { it[PROTECT_FAVORITES] = v }

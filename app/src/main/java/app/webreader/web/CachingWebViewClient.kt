@@ -15,6 +15,7 @@ import okhttp3.Request
 import okhttp3.ResponseBody
 import java.io.ByteArrayOutputStream
 import java.io.ByteArrayInputStream
+import java.io.IOException
 
 private const val TAG = "CachingWebViewClient"
 private const val MAX_CACHEABLE_BYTES = 20L * 1024 * 1024
@@ -31,6 +32,10 @@ class CachingWebViewClient(
     private val config: () -> SiteConfig,
     private val maxCacheableBytes: Long = MAX_CACHEABLE_BYTES,
     private val onPageStarted: (url: String) -> Unit = {},
+    private val cookies: (String) -> String? = { android.webkit.CookieManager.getInstance().getCookie(it) },
+    private val setCookie: (String, String) -> Unit = { url, value ->
+        android.webkit.CookieManager.getInstance().setCookie(url, value)
+    },
     private val onPageFinished: (url: String) -> Unit,
 ) : WebViewClient() {
 
@@ -62,16 +67,39 @@ class CachingWebViewClient(
         if (!config().isKnownHost(host)) return null
 
         val key = keyer.key(uri.toString())
-        cache.get(key)?.let { return serve(it) }
+        val cached = cache.get(key)
+        val networkFirst = request.isForMainFrame || cached?.mimeType == "text/html"
+        if (cached != null && !networkFirst) return serve(cached)
 
+        val fetched = try {
+            fetch(key, uri.toString(), headers)
+        } catch (e: IOException) {
+            null
+        }
+        return when {
+            fetched == null -> cached?.let { serve(it) }
+            else -> fetched
+        }
+    }
+
+    // Returns null when the response is unusable (non-2xx, off-site redirect, too large).
+    private fun fetch(key: String, originalUrl: String, headers: Map<String, String>): WebResourceResponse? {
         val builder = Request.Builder().url(keyer.resolve(key)).get()
         headers.forEach { (k, v) ->
             if (k.lowercase() !in SKIPPED_REQUEST_HEADERS) builder.header(k, v)
         }
+        cookies(originalUrl)?.takeIf { it.isNotEmpty() }?.let { builder.header("Cookie", it) }
+        var setsCookie = false
         val res = http.newCall(builder.build()).execute().use { resp ->
             if (!resp.isSuccessful) return null
             // A redirect that left the site must not be cached or served.
             if (!config().isKnownHost(resp.request.url.host)) return null
+            val setCookies = resp.headers("Set-Cookie")
+            if (setCookies.isNotEmpty()) {
+                setsCookie = true
+                val target = resp.request.url.toString()
+                setCookies.forEach { runCatching { setCookie(target, it) } }
+            }
             val body = resp.body ?: return null
             val bytes = readBounded(body) ?: return null
             val type = body.contentType()
@@ -81,11 +109,12 @@ class CachingWebViewClient(
                 bytes = bytes,
             )
         }
-        // Cache headers are deliberately ignored: resources stay until evicted.
-        try {
-            cache.put(key, res)
-        } catch (e: Exception) {
-            Log.w(TAG, "cache put failed", e)
+        if (!setsCookie) {
+            try {
+                cache.put(key, res)
+            } catch (e: Exception) {
+                Log.w(TAG, "cache put failed", e)
+            }
         }
         return serve(res)
     }

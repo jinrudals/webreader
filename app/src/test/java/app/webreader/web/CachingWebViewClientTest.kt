@@ -27,9 +27,10 @@ private class FakeRequest(
     private val url: String,
     private val method: String = "GET",
     private val headers: Map<String, String> = emptyMap(),
+    private val mainFrame: Boolean = false,
 ) : WebResourceRequest {
     override fun getUrl(): Uri = Uri.parse(url)
-    override fun isForMainFrame() = false
+    override fun isForMainFrame() = mainFrame
     override fun isRedirect() = false
     override fun hasGesture() = false
     override fun getMethod() = method
@@ -208,5 +209,46 @@ class CachingWebViewClientTest {
     fun onPageFinishedForwards() {
         client.onPageFinished(null, "http://x/y")
         assertTrue(finished == "http://x/y")
+    }
+
+    @Test
+    fun mainFrameIsNetworkFirstAndRefreshesCache() {
+        cache.put("/p", CachedResource("text/html", "utf-8", "old".toByteArray()))
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/html; charset=utf-8").setBody("new"))
+        assertEquals("new", String(intercept(FakeRequest("${base()}/p", mainFrame = true))!!.data.readBytes()))
+        assertEquals("new", String(cache.get("/p")!!.bytes))
+    }
+
+    @Test
+    fun cachedHtmlIsNetworkFirstEvenForSubFrame() {
+        cache.put("/p", CachedResource("text/html", "utf-8", "old".toByteArray()))
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody("new"))
+        assertEquals("new", String(intercept(FakeRequest("${base()}/p"))!!.data.readBytes()))
+    }
+
+    @Test
+    fun htmlFallsBackToCacheOnFailure() {
+        cache.put("/p", CachedResource("text/html", "utf-8", "old".toByteArray()))
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertEquals("old", String(intercept(FakeRequest("${base()}/p", mainFrame = true))!!.data.readBytes()))
+        server.shutdown()
+        assertEquals("old", String(intercept(FakeRequest("${base()}/p", mainFrame = true))!!.data.readBytes()))
+    }
+
+    @Test
+    fun cookiesForwardedAndSetCookieWrittenBackNotCached() {
+        val set = mutableListOf<Pair<String, String>>()
+        client = CachingWebViewClient(
+            UrlKeyer { config }, cache, OkHttpClient(), { config },
+            cookies = { "sid=abc" }, setCookie = { u, v -> set += u to v },
+        ) { finished = it }
+        server.enqueue(
+            MockResponse().setHeader("Content-Type", "text/html").addHeader("Set-Cookie", "a=1; Path=/").setBody("x"),
+        )
+        assertNotNull(intercept(FakeRequest("${base()}/c", mainFrame = true)))
+        assertEquals("sid=abc", server.takeRequest().getHeader("Cookie"))
+        assertEquals(1, set.size)
+        assertEquals("a=1; Path=/", set[0].second)
+        assertNull(cache.get("/c"))
     }
 }
