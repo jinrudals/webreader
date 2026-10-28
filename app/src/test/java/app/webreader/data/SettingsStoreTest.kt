@@ -29,18 +29,10 @@ class SettingsStoreTest {
     }
 
     @Test
-    fun baseUrlRoundTrip() = runTest {
+    fun legacyKeysReadable() = runTest {
         val s = newStore()
-        s.setBaseUrl("https://example.com")
-        s.setAliasHosts(setOf("m.example.com"))
+        s.seedLegacySite("https://example.com", setOf("m.example.com"), "/series/\\d+", "/ep/\\d+")
         assertEquals(SiteConfig("https://example.com", setOf("m.example.com")), s.siteConfig.first())
-    }
-
-    @Test
-    fun invalidRegexRejectedAndPreviousKept() = runTest {
-        val s = newStore()
-        assertTrue(s.setPatterns("/series/\\d+", "/ep/\\d+").isSuccess)
-        assertTrue(s.setPatterns("(", "/ep/\\d+").isFailure)
         assertEquals("/series/\\d+", s.seriesPattern.first())
         assertEquals("/ep/\\d+", s.episodePattern.first())
     }

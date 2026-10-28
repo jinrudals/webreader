@@ -5,7 +5,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import app.webreader.data.CachedResource
 import app.webreader.data.ResourceCache
-import app.webreader.domain.SiteConfig
+import app.webreader.domain.Site
+import app.webreader.domain.SiteRegistry
 import app.webreader.domain.UrlKeyer
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -43,16 +44,16 @@ class CachingWebViewClientTest {
 
     private lateinit var server: MockWebServer
     private lateinit var cache: ResourceCache
-    private var config = SiteConfig("", emptySet())
+    private var registry = SiteRegistry(emptyList())
     private var finished: String? = null
     private lateinit var client: CachingWebViewClient
 
     @Before
     fun setUp() {
         server = MockWebServer().also { it.start() }
-        config = SiteConfig("http://127.0.0.1:${server.port}", setOf("old.example"))
+        registry = SiteRegistry(listOf(siteA("http://127.0.0.1:${server.port}", setOf("old.example"))))
         cache = ResourceCache(tmp.newFolder(), { 10_000_000L }, { emptySet() })
-        client = CachingWebViewClient(UrlKeyer { config }, cache, OkHttpClient(), { config }) { finished = it }
+        client = CachingWebViewClient(UrlKeyer(), { registry }, cache, OkHttpClient()) { finished = it }
     }
 
     @After
@@ -60,13 +61,15 @@ class CachingWebViewClientTest {
         runCatching { server.shutdown() }
     }
 
+    private fun siteA(base: String, alias: Set<String>) = Site("a", "A", base, alias, "", "")
+
     private fun intercept(req: WebResourceRequest): WebResourceResponse? = client.shouldInterceptRequest(null, req)
 
     private fun base() = "http://127.0.0.1:${server.port}"
 
     @Test
     fun hitServedWithoutNetwork() {
-        cache.put("/a.png", CachedResource("image/png", null, byteArrayOf(1, 2, 3)))
+        cache.put("a:"+"/a.png", CachedResource("image/png", null, byteArrayOf(1, 2, 3)))
         server.shutdown()
         val r = intercept(FakeRequest("${base()}/a.png"))!!
         assertEquals("image/png", r.mimeType)
@@ -82,7 +85,7 @@ class CachingWebViewClientTest {
         assertEquals("text/html", r.mimeType)
         assertEquals("UTF-8", r.encoding)
         assertEquals("hi", String(r.data.readBytes()))
-        val stored = cache.get("/p?a=1&b=2")!!
+        val stored = cache.get("a:"+"/p?a=1&b=2")!!
         assertEquals("text/html", stored.mimeType)
         assertEquals("UTF-8", stored.encoding)
         assertEquals("hi", String(stored.bytes))
@@ -95,7 +98,7 @@ class CachingWebViewClientTest {
         val r = intercept(FakeRequest("http://old.example/img/x.png"))!!
         assertEquals("image/png", r.mimeType)
         assertEquals("/img/x.png", server.takeRequest().path)
-        assertNotNull(cache.get("/img/x.png"))
+        assertNotNull(cache.get("a:"+"/img/x.png"))
     }
 
     @Test
@@ -103,7 +106,7 @@ class CachingWebViewClientTest {
         server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody("img"))
         assertNotNull(intercept(FakeRequest("${base()}/i.png")))
         server.shutdown()
-        config = SiteConfig("http://new.example", setOf("127.0.0.1"))
+        registry = SiteRegistry(listOf(siteA("http://new.example", setOf("127.0.0.1"))))
         val r = intercept(FakeRequest("http://new.example/i.png"))!!
         assertEquals("img", String(r.data.readBytes()))
     }
@@ -122,7 +125,7 @@ class CachingWebViewClientTest {
     fun non2xxNotCached() {
         server.enqueue(MockResponse().setResponseCode(404).setBody("nope"))
         assertNull(intercept(FakeRequest("${base()}/missing")))
-        assertNull(cache.get("/missing"))
+        assertNull(cache.get("a:"+"/missing"))
     }
 
     @Test
@@ -153,24 +156,24 @@ class CachingWebViewClientTest {
         server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "http://localhost:${server.port}/other"))
         server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setBody("evil"))
         assertNull(intercept(FakeRequest("${base()}/r")))
-        assertNull(cache.get("/r"))
-        assertNull(cache.get("/other"))
+        assertNull(cache.get("a:"+"/r"))
+        assertNull(cache.get("a:"+"/other"))
     }
 
     @Test
     fun oversizedBodyNotIntercepted() {
-        client = CachingWebViewClient(UrlKeyer { config }, cache, OkHttpClient(), { config }, maxCacheableBytes = 4L) { finished = it }
+        client = CachingWebViewClient(UrlKeyer(), { registry }, cache, OkHttpClient(), maxCacheableBytes = 4L) { finished = it }
         server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setBody("0123456789"))
         assertNull(intercept(FakeRequest("${base()}/big")))
-        assertNull(cache.get("/big"))
+        assertNull(cache.get("a:"+"/big"))
     }
 
     @Test
     fun oversizedChunkedBodyNotIntercepted() {
-        client = CachingWebViewClient(UrlKeyer { config }, cache, OkHttpClient(), { config }, maxCacheableBytes = 4L) { finished = it }
+        client = CachingWebViewClient(UrlKeyer(), { registry }, cache, OkHttpClient(), maxCacheableBytes = 4L) { finished = it }
         server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setChunkedBody("0123456789", 3))
         assertNull(intercept(FakeRequest("${base()}/bigc")))
-        assertNull(cache.get("/bigc"))
+        assertNull(cache.get("a:"+"/bigc"))
     }
 
     @Test
@@ -191,7 +194,7 @@ class CachingWebViewClientTest {
     @Test
     fun putFailureStillServes() {
         val zero = ResourceCache(tmp.newFolder(), { 0L }, { emptySet() })
-        client = CachingWebViewClient(UrlKeyer { config }, zero, OkHttpClient(), { config }) { finished = it }
+        client = CachingWebViewClient(UrlKeyer(), { registry }, zero, OkHttpClient()) { finished = it }
         server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setBody("ok"))
         assertEquals("ok", String(intercept(FakeRequest("${base()}/z"))!!.data.readBytes()))
     }
@@ -199,7 +202,7 @@ class CachingWebViewClientTest {
     @Test
     fun onPageStartedForwards() {
         var started: String? = null
-        val c = CachingWebViewClient(UrlKeyer { config }, cache, OkHttpClient(), { config }, onPageStarted = { started = it }) {}
+        val c = CachingWebViewClient(UrlKeyer(), { registry }, cache, OkHttpClient(), onPageStarted = { started = it }) {}
         c.onPageStarted(null, "http://x/z", null)
         assertEquals("http://x/z", started)
         c.onPageStarted(null, null, null)
@@ -213,22 +216,22 @@ class CachingWebViewClientTest {
 
     @Test
     fun mainFrameIsNetworkFirstAndRefreshesCache() {
-        cache.put("/p", CachedResource("text/html", "utf-8", "old".toByteArray()))
+        cache.put("a:"+"/p", CachedResource("text/html", "utf-8", "old".toByteArray()))
         server.enqueue(MockResponse().setHeader("Content-Type", "text/html; charset=utf-8").setBody("new"))
         assertEquals("new", String(intercept(FakeRequest("${base()}/p", mainFrame = true))!!.data.readBytes()))
-        assertEquals("new", String(cache.get("/p")!!.bytes))
+        assertEquals("new", String(cache.get("a:"+"/p")!!.bytes))
     }
 
     @Test
     fun cachedHtmlIsNetworkFirstEvenForSubFrame() {
-        cache.put("/p", CachedResource("text/html", "utf-8", "old".toByteArray()))
+        cache.put("a:"+"/p", CachedResource("text/html", "utf-8", "old".toByteArray()))
         server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody("new"))
         assertEquals("new", String(intercept(FakeRequest("${base()}/p"))!!.data.readBytes()))
     }
 
     @Test
     fun htmlFallsBackToCacheOnFailure() {
-        cache.put("/p", CachedResource("text/html", "utf-8", "old".toByteArray()))
+        cache.put("a:"+"/p", CachedResource("text/html", "utf-8", "old".toByteArray()))
         server.enqueue(MockResponse().setResponseCode(500))
         assertEquals("old", String(intercept(FakeRequest("${base()}/p", mainFrame = true))!!.data.readBytes()))
         server.shutdown()
@@ -239,7 +242,7 @@ class CachingWebViewClientTest {
     fun cookiesForwardedAndSetCookieWrittenBackNotCached() {
         val set = mutableListOf<Pair<String, String>>()
         client = CachingWebViewClient(
-            UrlKeyer { config }, cache, OkHttpClient(), { config },
+            UrlKeyer(), { registry }, cache, OkHttpClient(),
             cookies = { "sid=abc" }, setCookie = { u, v -> set += u to v },
         ) { finished = it }
         server.enqueue(
@@ -249,6 +252,77 @@ class CachingWebViewClientTest {
         assertEquals("sid=abc", server.takeRequest().getHeader("Cookie"))
         assertEquals(1, set.size)
         assertEquals("a=1; Path=/", set[0].second)
-        assertNull(cache.get("/c"))
+        assertNull(cache.get("a:"+"/c"))
+    }
+
+    @Test
+    fun sameKeyDifferentSitesIsolatedInCache() {
+        val b = Site("b", "B", "http://localhost:${server.port}", emptySet(), "", "")
+        registry = SiteRegistry(registry.sites + b)
+        server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody("from-a"))
+        server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody("from-b"))
+        assertEquals("from-a", String(intercept(FakeRequest("${base()}/i.png"))!!.data.readBytes()))
+        assertEquals("from-b", String(intercept(FakeRequest("http://localhost:${server.port}/i.png"))!!.data.readBytes()))
+        server.shutdown()
+        assertEquals("from-a", String(intercept(FakeRequest("${base()}/i.png"))!!.data.readBytes()))
+        assertEquals("from-b", String(intercept(FakeRequest("http://localhost:${server.port}/i.png"))!!.data.readBytes()))
+        assertNotNull(cache.get("a:/i.png"))
+        assertNotNull(cache.get("b:/i.png"))
+    }
+
+    @Test
+    fun aliasHostServedFromThatSitesBase() {
+        val b = Site("b", "B", "http://localhost:${server.port}", setOf("b.alias"), "", "")
+        registry = SiteRegistry(registry.sites + b)
+        server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody("x"))
+        assertNotNull(intercept(FakeRequest("http://b.alias/y.png")))
+        assertEquals("localhost:${server.port}", server.takeRequest().getHeader("Host"))
+        assertNotNull(cache.get("b:/y.png"))
+        assertNull(cache.get("a:/y.png"))
+    }
+
+    @Test
+    fun redirectToOtherSitesHostNotServedNotCachedNoCookie() {
+        val b = Site("b", "B", "http://localhost:${server.port}", emptySet(), "", "")
+        registry = SiteRegistry(registry.sites + b)
+        val asked = mutableListOf<String>()
+        client = CachingWebViewClient(
+            UrlKeyer(), { registry }, cache, OkHttpClient(),
+            cookies = { asked += it; "sid=abc" },
+        ) { finished = it }
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "http://localhost:${server.port}/other"))
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setBody("evil"))
+        assertNull(intercept(FakeRequest("${base()}/r")))
+        assertNull(cache.get("a:/r"))
+        assertNull(cache.get("a:/other"))
+        assertNull(cache.get("b:/other"))
+        assertEquals(1, server.requestCount)
+        assertTrue(asked.none { "localhost" in it })
+        assertEquals(1, asked.size)
+    }
+
+    @Test
+    fun redirectWithinSiteKeepsCookieOnlyForSiteHosts() {
+        registry = SiteRegistry(listOf(siteA(base(), setOf("localhost"))))
+        val asked = mutableListOf<String>()
+        client = CachingWebViewClient(
+            UrlKeyer(), { registry }, cache, OkHttpClient(),
+            cookies = { asked += it; "sid=abc" },
+        ) { finished = it }
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "http://localhost:${server.port}/final"))
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setBody("ok"))
+        assertEquals("ok", String(intercept(FakeRequest("${base()}/r"))!!.data.readBytes()))
+        assertEquals("sid=abc", server.takeRequest().getHeader("Cookie"))
+        assertEquals("sid=abc", server.takeRequest().getHeader("Cookie"))
+        assertEquals(listOf("${base()}/r", "http://localhost:${server.port}/final"), asked)
+        assertNotNull(cache.get("a:/r"))
+    }
+
+    @Test
+    fun tooManyRedirectsReturnsNull() {
+        repeat(7) { server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "${base()}/n$it")) }
+        assertNull(intercept(FakeRequest("${base()}/r")))
+        assertEquals(6, server.requestCount)
+        assertNull(cache.get("a:/r"))
     }
 }

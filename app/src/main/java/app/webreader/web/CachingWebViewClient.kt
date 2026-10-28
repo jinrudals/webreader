@@ -8,8 +8,11 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import app.webreader.data.CachedResource
 import app.webreader.data.ResourceCache
-import app.webreader.domain.SiteConfig
+import app.webreader.domain.Site
+import app.webreader.domain.SiteRegistry
 import app.webreader.domain.UrlKeyer
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.ResponseBody
@@ -19,6 +22,7 @@ import java.io.IOException
 
 private const val TAG = "CachingWebViewClient"
 private const val MAX_CACHEABLE_BYTES = 20L * 1024 * 1024
+private const val MAX_REDIRECTS = 5
 private const val DEFAULT_MIME = "application/octet-stream"
 private val CORS_HEADERS = mapOf("Access-Control-Allow-Origin" to "*")
 private val SKIPPED_REQUEST_HEADERS = setOf(
@@ -27,9 +31,9 @@ private val SKIPPED_REQUEST_HEADERS = setOf(
 
 class CachingWebViewClient(
     private val keyer: UrlKeyer,
+    private val registry: () -> SiteRegistry,
     private val cache: ResourceCache,
     private val http: OkHttpClient,
-    private val config: () -> SiteConfig,
     private val maxCacheableBytes: Long = MAX_CACHEABLE_BYTES,
     private val onPageStarted: (url: String) -> Unit = {},
     private val cookies: (String) -> String? = { android.webkit.CookieManager.getInstance().getCookie(it) },
@@ -38,6 +42,8 @@ class CachingWebViewClient(
     },
     private val onPageFinished: (url: String) -> Unit,
 ) : WebViewClient() {
+
+    private val noRedirectHttp: OkHttpClient by lazy { http.newBuilder().followRedirects(false).build() }
 
     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest): WebResourceResponse? =
         try {
@@ -64,15 +70,16 @@ class CachingWebViewClient(
         val uri = request.url
         if (uri.scheme?.lowercase() !in setOf("http", "https")) return null
         val host = uri.host ?: return null
-        if (!config().isKnownHost(host)) return null
+        val site = registry().forHost(host) ?: return null
 
         val key = keyer.key(uri.toString())
-        val cached = cache.get(key)
+        val cacheKey = "${site.id}:$key"
+        val cached = cache.get(cacheKey)
         val networkFirst = request.isForMainFrame || cached?.mimeType == "text/html"
         if (cached != null && !networkFirst) return serve(cached)
 
         val fetched = try {
-            fetch(key, uri.toString(), headers)
+            fetch(site, key, cacheKey, headers)
         } catch (e: IOException) {
             null
         }
@@ -82,36 +89,49 @@ class CachingWebViewClient(
         }
     }
 
-    // Returns null when the response is unusable (non-2xx, off-site redirect, too large).
-    private fun fetch(key: String, originalUrl: String, headers: Map<String, String>): WebResourceResponse? {
-        val builder = Request.Builder().url(keyer.resolve(key)).get()
-        headers.forEach { (k, v) ->
-            if (k.lowercase() !in SKIPPED_REQUEST_HEADERS) builder.header(k, v)
-        }
-        cookies(originalUrl)?.takeIf { it.isNotEmpty() }?.let { builder.header("Cookie", it) }
+    // Returns null when the response is unusable (non-2xx, off-site redirect, too many hops, too large).
+    private fun fetch(site: Site, key: String, cacheKey: String, headers: Map<String, String>): WebResourceResponse? {
+        val hosts = site.hosts()
+        var url = keyer.resolve(site.baseUrl, key).toHttpUrlOrNull() ?: return null
         var setsCookie = false
-        val res = http.newCall(builder.build()).execute().use { resp ->
-            if (!resp.isSuccessful) return null
-            // A redirect that left the site must not be cached or served.
-            if (!config().isKnownHost(resp.request.url.host)) return null
-            val setCookies = resp.headers("Set-Cookie")
-            if (setCookies.isNotEmpty()) {
-                setsCookie = true
-                val target = resp.request.url.toString()
-                setCookies.forEach { runCatching { setCookie(target, it) } }
+        var hops = 0
+        var fetchedRes: CachedResource? = null
+        while (fetchedRes == null) {
+            if (url.host.lowercase() !in hosts) return null
+            val builder = Request.Builder().url(url).get()
+            headers.forEach { (k, v) ->
+                if (k.lowercase() !in SKIPPED_REQUEST_HEADERS) builder.header(k, v)
             }
-            val body = resp.body ?: return null
-            val bytes = readBounded(body) ?: return null
-            val type = body.contentType()
-            CachedResource(
-                mimeType = type?.let { "${it.type}/${it.subtype}".lowercase() } ?: DEFAULT_MIME,
-                encoding = type?.charset()?.name(),
-                bytes = bytes,
-            )
+            cookies(url.toString())?.takeIf { it.isNotEmpty() }?.let { builder.header("Cookie", it) }
+            val outcome: Any? = noRedirectHttp.newCall(builder.build()).execute().use { resp ->
+                val setCookies = resp.headers("Set-Cookie")
+                if (setCookies.isNotEmpty()) {
+                    setsCookie = true
+                    val target = resp.request.url.toString()
+                    setCookies.forEach { runCatching { setCookie(target, it) } }
+                }
+                if (resp.isRedirect) {
+                    val next = resp.header("Location")?.let { resp.request.url.resolve(it) } ?: return null
+                    if (++hops > MAX_REDIRECTS) return null
+                    next
+                } else {
+                    if (!resp.isSuccessful) return null
+                    val body = resp.body ?: return null
+                    val bytes = readBounded(body) ?: return null
+                    val type = body.contentType()
+                    CachedResource(
+                        mimeType = type?.let { "${it.type}/${it.subtype}".lowercase() } ?: DEFAULT_MIME,
+                        encoding = type?.charset()?.name(),
+                        bytes = bytes,
+                    )
+                }
+            }
+            if (outcome is CachedResource) fetchedRes = outcome else url = outcome as HttpUrl
         }
+        val res: CachedResource = fetchedRes
         if (!setsCookie) {
             try {
-                cache.put(key, res)
+                cache.put(cacheKey, res)
             } catch (e: Exception) {
                 Log.w(TAG, "cache put failed", e)
             }

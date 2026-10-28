@@ -30,32 +30,24 @@ class SettingsStore(context: Context, dataStoreName: String = "settings") {
         if (it is IOException) emit(emptyPreferences()) else throw it
     }
 
+    // Legacy single-site keys: read only, consumed by LegacyMigrator.
     val siteConfig: Flow<SiteConfig> = safeData.map {
         SiteConfig(it[BASE_URL] ?: "", it[ALIAS_HOSTS] ?: emptySet())
-    }
-
-    suspend fun setBaseUrl(url: String) {
-        dataStore.edit { it[BASE_URL] = url }
-    }
-
-    suspend fun setAliasHosts(hosts: Set<String>) {
-        dataStore.edit { it[ALIAS_HOSTS] = hosts }
     }
 
     val seriesPattern: Flow<String> = safeData.map { it[SERIES_PATTERN] ?: "" }
     val episodePattern: Flow<String> = safeData.map { it[EPISODE_PATTERN] ?: "" }
 
-    suspend fun setPatterns(series: String, episode: String): Result<Unit> {
-        val check = runCatching {
-            if (series.isNotEmpty()) Regex(series)
-            if (episode.isNotEmpty()) Regex(episode)
-        }
-        check.exceptionOrNull()?.let { return Result.failure(it) }
+    /** Writes the pre-multi-site keys so migration can be tested; production never writes them. */
+    internal suspend fun seedLegacySite(
+        baseUrl: String? = null, aliasHosts: Set<String>? = null, series: String? = null, episode: String? = null,
+    ) {
         dataStore.edit {
-            it[SERIES_PATTERN] = series
-            it[EPISODE_PATTERN] = episode
+            baseUrl?.let { v -> it[BASE_URL] = v }
+            aliasHosts?.let { v -> it[ALIAS_HOSTS] = v }
+            series?.let { v -> it[SERIES_PATTERN] = v }
+            episode?.let { v -> it[EPISODE_PATTERN] = v }
         }
-        return Result.success(Unit)
     }
 
     val cacheLimitMb: Flow<Int> = safeData.map { it[CACHE_LIMIT_MB] ?: DEFAULT_CACHE_LIMIT_MB }
@@ -70,7 +62,21 @@ class SettingsStore(context: Context, dataStoreName: String = "settings") {
         dataStore.edit { it[PROTECT_FAVORITES] = v }
     }
 
+    val currentSiteId: Flow<String?> = safeData.map { it[CURRENT_SITE_ID] }
+
+    suspend fun setCurrentSiteId(id: String) {
+        dataStore.edit { it[CURRENT_SITE_ID] = id }
+    }
+
+    val legacyMigrated: Flow<Boolean> = safeData.map { it[LEGACY_MIGRATED] ?: false }
+
+    suspend fun setLegacyMigrated() {
+        dataStore.edit { it[LEGACY_MIGRATED] = true }
+    }
+
     private companion object {
+        val CURRENT_SITE_ID = stringPreferencesKey("current_site_id")
+        val LEGACY_MIGRATED = booleanPreferencesKey("legacy_migrated")
         const val DEFAULT_CACHE_LIMIT_MB = 500
         val BASE_URL = stringPreferencesKey("base_url")
         val ALIAS_HOSTS = stringSetPreferencesKey("alias_hosts")

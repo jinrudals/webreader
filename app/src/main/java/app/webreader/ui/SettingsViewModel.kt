@@ -6,27 +6,25 @@ import androidx.lifecycle.viewModelScope
 import app.webreader.AppContainer
 import app.webreader.data.ResourceCache
 import app.webreader.data.SettingsStore
-import app.webreader.domain.SiteConfig
+import app.webreader.data.SiteRepository
+import app.webreader.domain.Site
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.net.URI
 
-/** Validates and normalizes input; [SettingsStore] itself is lenient. */
+/** Site validation lives in [SiteRepository]; cache settings are global. */
 class SettingsViewModel(
     private val settings: SettingsStore,
     private val cache: ResourceCache,
+    private val siteRepository: SiteRepository,
 ) : ViewModel() {
 
-    val siteConfig: Flow<SiteConfig> = settings.siteConfig
-    val seriesPattern: Flow<String> = settings.seriesPattern
-    val episodePattern: Flow<String> = settings.episodePattern
+    val sites: Flow<List<Site>> = siteRepository.sites
     val cacheLimitMb: Flow<Int> = settings.cacheLimitMb
     val protectFavorites: Flow<Boolean> = settings.protectFavorites
 
@@ -38,32 +36,14 @@ class SettingsViewModel(
         }
     }.flowOn(Dispatchers.IO)
 
-    suspend fun saveBaseUrl(url: String): Result<Unit> {
-        val trimmed = url.trim()
-        val uri = runCatching { URI(trimmed) }.getOrNull()
-        val scheme = uri?.scheme?.lowercase()
-        val host = uri?.host?.lowercase()
-        if (scheme !in setOf("http", "https") || host.isNullOrBlank()) {
-            return Result.failure(IllegalArgumentException("Enter a valid http(s) URL"))
-        }
-        val rest = trimmed.substring(trimmed.indexOf("://") + 3)
-        val normalized = "$scheme://" + rest.replaceFirst(Regex(Regex.escape(uri!!.host), RegexOption.IGNORE_CASE), host)
-        val config = settings.siteConfig.first()
-        val oldHost = runCatching { URI(config.baseUrl).host }.getOrNull()?.lowercase()
-        if (!oldHost.isNullOrBlank() && oldHost != host) {
-            settings.setAliasHosts((config.aliasHosts + oldHost).map { it.lowercase() }.toSet() - host)
-        }
-        settings.setBaseUrl(normalized)
-        return Result.success(Unit)
-    }
+    suspend fun addSite(name: String, baseUrl: String, aliases: String, series: String, episode: String): Result<Site> =
+        siteRepository.add(name, baseUrl, aliases, series, episode)
 
-    suspend fun saveAliasHosts(text: String) {
-        val hosts = text.split(Regex("[,\\s]+")).map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
-        settings.setAliasHosts(hosts)
-    }
+    suspend fun updateSite(
+        id: String, name: String, baseUrl: String, aliases: String, series: String, episode: String,
+    ): Result<Unit> = siteRepository.update(id, name, baseUrl, aliases, series, episode)
 
-    suspend fun savePatterns(series: String, episode: String): Result<Unit> =
-        settings.setPatterns(series.trim(), episode.trim())
+    fun deleteSite(id: String): Job = viewModelScope.launch { siteRepository.delete(id) }
 
     suspend fun saveCache(limitMb: Int, protectFavorites: Boolean) {
         settings.setCacheLimitMb(limitMb.coerceAtLeast(1))
@@ -76,7 +56,7 @@ class SettingsViewModel(
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            SettingsViewModel(container.settings, container.resourceCache) as T
+            SettingsViewModel(container.settings, container.resourceCache, container.siteRepository) as T
     }
 
     private companion object {

@@ -1,11 +1,11 @@
 package app.webreader.data.db
 
 import androidx.room.Entity
-import androidx.room.PrimaryKey
 
-@Entity(tableName = "read_history")
+@Entity(tableName = "read_history", primaryKeys = ["siteId", "key"])
 data class ReadHistory(
-    @PrimaryKey val key: String,
+    val siteId: String,
+    val key: String,
     val lastPosition: Int,
     val updatedAt: Long,
 )

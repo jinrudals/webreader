@@ -1,6 +1,6 @@
 package app.webreader.domain
 
-class UrlKeyer(private val config: () -> SiteConfig) {
+class UrlKeyer {
 
     fun key(url: String): String {
         val noFragment = url.substringBefore('#')
@@ -26,5 +26,5 @@ class UrlKeyer(private val config: () -> SiteConfig) {
         return path + "?" + params.joinToString("&") { (k, v) -> if (v.isEmpty()) k else "$k=$v" }
     }
 
-    fun resolve(key: String): String = config().baseUrl.trimEnd('/') + (if (key.startsWith("/")) key else "/$key")
+    fun resolve(baseUrl: String, key: String): String = baseUrl.trimEnd('/') + (if (key.startsWith("/")) key else "/$key")
 }

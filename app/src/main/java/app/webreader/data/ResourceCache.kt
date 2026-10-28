@@ -91,6 +91,11 @@ class ResourceCache(
         loaded = true
     }
 
+    fun removePrefix(prefix: String) = synchronized(lock) {
+        ensureLoaded()
+        index.keys.filter { it.startsWith(prefix) }.forEach { remove(it) }
+    }
+
     private fun remove(key: String) {
         index.remove(key)?.let { total -= it.size }
         payloadFile(key).delete()
