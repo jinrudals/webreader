@@ -71,7 +71,6 @@ class AppContainer(context: Context) {
             .stateIn(appScope, SharingStarted.Eagerly, initialCurrent)
     val currentSiteIdFlow: StateFlow<String> =
         currentSite.map { it?.id ?: "" }.stateIn(appScope, SharingStarted.Eagerly, initialCurrent?.id ?: "")
-    val currentSiteId: () -> String = { currentSiteIdFlow.value }
 
     suspend fun selectSite(id: String) = settings.setCurrentSiteId(id)
 

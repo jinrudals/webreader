@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,22 +53,18 @@ fun BrowserScreen(
     val sites by container.registry.collectAsState()
     val site by container.currentSite.collectAsState()
     val current = site
-    if (current == null) {
-        if (visible) {
-            Column(modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) {
-                Text("Add a site to start reading")
-                Button(onClick = onAddSite) { Text("Add a site") }
-            }
-        }
-        return
-    }
-    val baseUrl = current.baseUrl
-
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var currentUrl by remember { mutableStateOf(request?.url ?: baseUrl) }
-    var handledRequestId by remember { mutableStateOf(request?.id) }
-    var loadedSiteId by remember { mutableStateOf(request?.let { sites.forUrl(it.url)?.id } ?: current.id) }
+    var currentUrl by remember { mutableStateOf(request?.url ?: current?.baseUrl.orEmpty()) }
+    var loadState by remember {
+        mutableStateOf(
+            BrowserLoadState(
+                handledRequestId = request?.id,
+                seenSiteId = current?.id,
+                pendingSiteId = request?.let { sites.forUrl(it.url)?.id }?.takeIf { it != current?.id },
+            ),
+        )
+    }
     var title by remember { mutableStateOf("") }
     var canGoBack by remember { mutableStateOf(false) }
     val webView = remember { arrayOfNulls<WebView>(1) }
@@ -99,6 +96,7 @@ fun BrowserScreen(
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
+            tracker.onPause()
             webView[0]?.destroy()
             webView[0] = null
         }
@@ -108,6 +106,25 @@ fun BrowserScreen(
 
     val favorite by remember(currentUrl) { viewModel.isFavorite(currentUrl) }.collectAsState(false)
     val favoritable = viewModel.pageType(currentUrl) != PageType.OTHER
+
+    LaunchedEffect(current == null) {
+        if (current == null) {
+            currentUrl = ""
+            title = ""
+            canGoBack = false
+            loadState = loadState.copy(seenSiteId = null, pendingSiteId = null)
+        }
+    }
+
+    if (current == null) {
+        if (visible) {
+            Column(modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) {
+                Text("Add a site to start reading")
+                Button(onClick = onAddSite) { Text("Add a site") }
+            }
+        }
+        return
+    }
 
     Column(if (visible) modifier.fillMaxSize() else Modifier.size(0.dp)) {
         if (visible) {
@@ -135,18 +152,20 @@ fun BrowserScreen(
                     webViewClient = client
                     setOnScrollChangeListener { _, _, y, _, _ -> tracker.onScroll(y) }
                     webView[0] = this
-                    loadUrl(currentUrl)
+                    if (currentUrl.isNotBlank()) loadUrl(currentUrl)
                 }
             },
             update = { wv ->
-                if (request != null && request.id != handledRequestId) {
-                    handledRequestId = request.id
-                    loadedSiteId = sites.forUrl(request.url)?.id ?: current.id
-                    wv.loadUrl(request.url)
-                } else if (current.id != loadedSiteId) {
-                    loadedSiteId = current.id
-                    wv.loadUrl(baseUrl)
-                }
+                val decision = decideLoad(
+                    loadState, request, request?.let { sites.forUrl(it.url)?.id }, current.id, current.baseUrl,
+                )
+                if (decision.state != loadState) loadState = decision.state
+                decision.url?.let { wv.loadUrl(it) }
+            },
+            onRelease = { wv ->
+                tracker.onPause()
+                wv.destroy()
+                webView[0] = null
             },
         )
     }
