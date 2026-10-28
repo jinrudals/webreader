@@ -58,7 +58,10 @@ class MainActivity : ComponentActivity() {
                         modifier = mod,
                     )
                     when (destination) {
-                        Destination.Library -> Text("Library", mod)
+                        Destination.Library -> {
+                            val lib: LibraryViewModel = viewModel(factory = LibraryViewModel.Factory(container))
+                            LibraryScreen(lib, onOpen = ::openInBrowser, modifier = mod)
+                        }
                         Destination.Settings -> Text("Settings", mod)
                         Destination.Browser -> Unit
                     }
