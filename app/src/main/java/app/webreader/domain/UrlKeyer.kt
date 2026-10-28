@@ -1,14 +1,19 @@
 package app.webreader.domain
 
-import java.net.URI
-
 class UrlKeyer(private val config: () -> SiteConfig) {
 
     fun key(url: String): String {
-        val uri = URI(url)
-        val rawPath = uri.rawPath.orEmpty()
-        val path = rawPath.trimEnd('/').ifEmpty { "/" }
-        val params = uri.rawQuery
+        val noFragment = url.substringBefore('#')
+        val rawQuery = if ('?' in noFragment) noFragment.substringAfter('?') else null
+        var rest = noFragment.substringBefore('?')
+        val schemeEnd = rest.indexOf("://")
+        if (schemeEnd >= 0) {
+            val afterScheme = rest.substring(schemeEnd + 3)
+            val slash = afterScheme.indexOf('/')
+            rest = if (slash < 0) "" else afterScheme.substring(slash)
+        }
+        val path = rest.trimEnd('/').ifEmpty { "/" }
+        val params = rawQuery
             ?.split('&')
             ?.filter { it.isNotEmpty() }
             ?.map { p ->
@@ -21,5 +26,5 @@ class UrlKeyer(private val config: () -> SiteConfig) {
         return path + "?" + params.joinToString("&") { (k, v) -> if (v.isEmpty()) k else "$k=$v" }
     }
 
-    fun resolve(key: String): String = config().baseUrl.trimEnd('/') + key
+    fun resolve(key: String): String = config().baseUrl.trimEnd('/') + (if (key.startsWith("/")) key else "/$key")
 }

@@ -30,4 +30,24 @@ class UrlKeyerTest {
     fun resolveUsesCurrentBase() {
         assertEquals("https://new.com/ep/1", keyer("https://new.com").resolve("/ep/1"))
     }
+
+    @Test
+    fun malformedUrlDoesNotThrow() {
+        val k = keyer()
+        assertEquals(k.key("https://b.net/a b|c{1}?q=x y"), k.key("https://a.com/a b|c{1}?q=x y"))
+        assertEquals("/a b|c?q=x y", k.key("https://a.com/a b|c?q=x y"))
+    }
+
+    @Test
+    fun pathOnlyAndRoot() {
+        val k = keyer()
+        assertEquals("/ep/1", k.key("/ep/1"))
+        assertEquals("/", k.key("/"))
+        assertEquals("/", k.key("https://a.com"))
+    }
+
+    @Test
+    fun resolvePrefixesSlash() {
+        assertEquals("https://a.com/ep/1", keyer().resolve("ep/1"))
+    }
 }
