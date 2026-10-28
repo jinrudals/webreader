@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -56,10 +57,9 @@ fun SiteEditForm(
         OutlinedTextField(
             value = episode, onValueChange = { episode = it; error = null },
             label = { Text("Episode pattern (regex)") }, singleLine = true,
-            isError = error != null,
-            supportingText = error?.let { { Text(it) } },
             modifier = Modifier.fillMaxWidth(),
         )
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
                 scope.launch {

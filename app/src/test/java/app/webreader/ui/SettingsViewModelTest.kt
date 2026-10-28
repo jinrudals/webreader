@@ -99,3 +99,12 @@ class SettingsViewModelTest {
         assertEquals("A2", vm.sites.first().single().name)
     }
 }
+
+class SelectionClearTest {
+    @org.junit.Test fun keepsUntilLoaded() {
+        org.junit.Assert.assertFalse(shouldClearSelection("a", null))
+        org.junit.Assert.assertFalse(shouldClearSelection("a", listOf("a")))
+        org.junit.Assert.assertTrue(shouldClearSelection("a", emptyList()))
+        org.junit.Assert.assertFalse(shouldClearSelection(NEW_SITE, emptyList()))
+    }
+}

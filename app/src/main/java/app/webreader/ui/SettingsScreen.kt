@@ -31,6 +31,10 @@ import kotlinx.coroutines.flow.first
 import java.net.URI
 import kotlinx.coroutines.launch
 
+/** Restored selections must survive until the first real site-list emission. */
+internal fun shouldClearSelection(id: String, loadedIds: List<String>?): Boolean =
+    loadedIds != null && id != NEW_SITE && id !in loadedIds
+
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
@@ -39,7 +43,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
     var protect by rememberSaveable { mutableStateOf(true) }
     var editing by rememberSaveable { mutableStateOf<String?>(null) }
     var deleting by rememberSaveable { mutableStateOf<String?>(null) }
-    val sites by viewModel.sites.collectAsState(initial = emptyList())
+    val loadedSites by viewModel.sites.collectAsState(initial = null)
+    val sites = loadedSites.orEmpty()
 
     var cacheError by rememberSaveable { mutableStateOf<String?>(null) }
     var saved by rememberSaveable { mutableStateOf<String?>(null) }
@@ -69,7 +74,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
             )
             return
         }
-        editing = null
+        if (shouldClearSelection(editTarget, loadedSites?.map { it.id })) editing = null
     }
 
     val sizeBytes by viewModel.cacheSizeBytes.collectAsState(initial = 0L)
@@ -129,7 +134,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
     deleting?.let { id ->
         val site = sites.firstOrNull { it.id == id }
         if (site == null) {
-            deleting = null
+            if (shouldClearSelection(id, loadedSites?.map { it.id })) deleting = null
         } else {
             AlertDialog(
                 onDismissRequest = { deleting = null },
@@ -158,4 +163,4 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
     }
 }
 
-private const val NEW_SITE = "\u0000new"
+internal const val NEW_SITE = "\u0000new"
