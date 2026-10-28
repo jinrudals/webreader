@@ -82,4 +82,40 @@ class LegacyMigratorTest {
         assertNull(settings.currentSiteId.first())
         assertTrue(settings.legacyMigrated.first())
     }
+
+    @Test
+    fun invalidLegacyUrlNotMarkedMigratedAndLogged() = runTest {
+        settings.setBaseUrl("not a url")
+        db.favoriteDao().upsert(Favorite("", "/series/1", Favorite.TYPE_SERIES, "S", 1))
+
+        migrator.run()
+
+        assertTrue(!settings.legacyMigrated.first())
+        assertTrue(repo.sites.first().isEmpty())
+        assertTrue(org.robolectric.shadows.ShadowLog.getLogsForTag("LegacyMigrator").isNotEmpty())
+
+        settings.setBaseUrl("https://a.example.com")
+        migrator.run()
+        val site = repo.sites.first().single()
+        assertEquals(1, db.favoriteDao().observeAll(site.id).first().size)
+        assertTrue(settings.legacyMigrated.first())
+    }
+
+    @Test
+    fun rerunAfterPartialFailureReusesExistingSiteAndReassigns() = runTest {
+        settings.setBaseUrl("https://a.example.com")
+        val existing = repo.add("Default", "https://a.example.com", "", "", "").getOrThrow()
+        db.favoriteDao().upsert(Favorite("", "/series/1", Favorite.TYPE_SERIES, "S", 1))
+        db.readHistoryDao().upsert(ReadHistory("", "/ep/1", 7, 1))
+        cache.put("/series/1", CachedResource("text/html", null, byteArrayOf(1)))
+
+        migrator.run()
+
+        assertEquals(existing.id, repo.sites.first().single().id)
+        assertEquals(existing.id, settings.currentSiteId.first())
+        assertEquals(1, db.favoriteDao().observeAll(existing.id).first().size)
+        assertEquals(7, db.readHistoryDao().get(existing.id, "/ep/1")?.lastPosition)
+        assertNull(cache.get("/series/1"))
+        assertTrue(settings.legacyMigrated.first())
+    }
 }
