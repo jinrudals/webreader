@@ -79,11 +79,11 @@ class CachingWebViewClientTest {
         server.enqueue(MockResponse().setHeader("Content-Type", "text/html; charset=utf-8").setBody("hi"))
         val r = intercept(FakeRequest("${base()}/p?b=2&a=1", headers = mapOf("Range-X" to "1", "Accept-Encoding" to "br")))!!
         assertEquals("text/html", r.mimeType)
-        assertEquals("utf-8", r.encoding)
+        assertEquals("UTF-8", r.encoding)
         assertEquals("hi", String(r.data.readBytes()))
         val stored = cache.get("/p?a=1&b=2")!!
         assertEquals("text/html", stored.mimeType)
-        assertEquals("utf-8", stored.encoding)
+        assertEquals("UTF-8", stored.encoding)
         assertEquals("hi", String(stored.bytes))
         assertNotNull(server.takeRequest().path)
     }
@@ -128,6 +128,71 @@ class CachingWebViewClientTest {
     fun networkFailureWithoutCacheReturnsNull() {
         server.shutdown()
         assertNull(intercept(FakeRequest("${base()}/x")))
+    }
+
+    @Test
+    fun sensitiveHeadersNotForwarded() {
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setBody("ok"))
+        val h = mapOf(
+            "Cookie" to "s=1", "Authorization" to "Bearer x", "Referer" to "http://old.example/",
+            "Proxy-Authorization" to "p", "X-Test" to "yes", "Range-X" to "1",
+        )
+        assertNotNull(intercept(FakeRequest("${base()}/h", headers = h)))
+        val rec = server.takeRequest()
+        assertNull(rec.getHeader("Cookie"))
+        assertNull(rec.getHeader("Authorization"))
+        assertNull(rec.getHeader("Referer"))
+        assertNull(rec.getHeader("Proxy-Authorization"))
+        assertEquals("yes", rec.getHeader("X-Test"))
+        assertNull(rec.getHeader("Range"))
+    }
+
+    @Test
+    fun redirectToUnknownHostNotCached() {
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "http://localhost:${server.port}/other"))
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setBody("evil"))
+        assertNull(intercept(FakeRequest("${base()}/r")))
+        assertNull(cache.get("/r"))
+        assertNull(cache.get("/other"))
+    }
+
+    @Test
+    fun oversizedBodyNotIntercepted() {
+        client = CachingWebViewClient(UrlKeyer { config }, cache, OkHttpClient(), { config }, maxCacheableBytes = 4L) { finished = it }
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setBody("0123456789"))
+        assertNull(intercept(FakeRequest("${base()}/big")))
+        assertNull(cache.get("/big"))
+    }
+
+    @Test
+    fun oversizedChunkedBodyNotIntercepted() {
+        client = CachingWebViewClient(UrlKeyer { config }, cache, OkHttpClient(), { config }, maxCacheableBytes = 4L) { finished = it }
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setChunkedBody("0123456789", 3))
+        assertNull(intercept(FakeRequest("${base()}/bigc")))
+        assertNull(cache.get("/bigc"))
+    }
+
+    @Test
+    fun missingContentTypeDefaultsToOctetStream() {
+        server.enqueue(MockResponse().setBody("x"))
+        val r = intercept(FakeRequest("${base()}/n"))!!
+        assertEquals("application/octet-stream", r.mimeType)
+    }
+
+    @Test
+    fun charsetParsedCaseInsensitively() {
+        server.enqueue(MockResponse().setHeader("Content-Type", "Text/HTML; CHARSET=UTF-8").setBody("x"))
+        val r = intercept(FakeRequest("${base()}/c"))!!
+        assertEquals("text/html", r.mimeType)
+        assertEquals("UTF-8", r.encoding?.uppercase())
+    }
+
+    @Test
+    fun putFailureStillServes() {
+        val zero = ResourceCache(tmp.newFolder(), { 0L }, { emptySet() })
+        client = CachingWebViewClient(UrlKeyer { config }, zero, OkHttpClient(), { config }) { finished = it }
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setBody("ok"))
+        assertEquals("ok", String(intercept(FakeRequest("${base()}/z"))!!.data.readBytes()))
     }
 
     @Test
