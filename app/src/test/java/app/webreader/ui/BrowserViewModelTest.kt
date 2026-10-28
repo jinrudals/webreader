@@ -39,7 +39,7 @@ class BrowserViewModelTest {
             .allowMainThreadQueries().build()
         val classifier = PageClassifier("^/series/\\d+", "^/ep/\\d+")
         vm = BrowserViewModel(
-            db.favoriteDao(), db.readHistoryDao(), UrlKeyer { config }, { classifier }, { now },
+            db.favoriteDao(), db.readHistoryDao(), UrlKeyer { config }, { classifier }, { "s" }, { now },
         )
     }
 
@@ -52,14 +52,14 @@ class BrowserViewModelTest {
     @Test
     fun otherPagesNotFavoritable() = runTest {
         vm.toggleFavorite("https://a.example.com/about", "About").join()
-        assertTrue(db.favoriteDao().allKeys().isEmpty())
+        assertTrue(db.favoriteDao().observeAll("s").first().map { it.key }.isEmpty())
         assertFalse(vm.isFavorite("https://a.example.com/about").first())
     }
 
     @Test
     fun toggleStoresHostIndependentKey() = runTest {
         vm.toggleFavorite("https://a.example.com/series/5?b=2&a=1#x", "S").join()
-        assertEquals(listOf("/series/5?a=1&b=2"), db.favoriteDao().allKeys())
+        assertEquals(listOf("/series/5?a=1&b=2"), db.favoriteDao().observeAll("s").first().map { it.key })
     }
 
     @Test
@@ -86,11 +86,11 @@ class BrowserViewModelTest {
         vm.savePosition(url, 300).join()
         now = 2000L
         vm.onPageFinished(url, "T").join()
-        val h = db.readHistoryDao().get("/ep/3")!!
+        val h = db.readHistoryDao().get("s", "/ep/3")!!
         assertEquals(300, h.lastPosition)
         assertEquals(2000L, h.updatedAt)
         vm.onPageFinished("https://a.example.com/about", "A").join()
-        assertNull(db.readHistoryDao().get("/about"))
+        assertNull(db.readHistoryDao().get("s", "/about"))
     }
 
     @Test
@@ -105,7 +105,7 @@ class BrowserViewModelTest {
     fun episodeAndSeriesTypesRecorded() = runTest {
         vm.toggleFavorite("https://a.example.com/series/5", "S").join()
         vm.toggleFavorite("https://a.example.com/ep/9", "").join()
-        val all = db.favoriteDao().observeAll().first().associateBy { it.key }
+        val all = db.favoriteDao().observeAll("s").first().associateBy { it.key }
         assertEquals(Favorite.TYPE_SERIES, all["/series/5"]!!.type)
         assertEquals(Favorite.TYPE_EPISODE, all["/ep/9"]!!.type)
         assertEquals("/ep/9", all["/ep/9"]!!.title)

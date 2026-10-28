@@ -1,11 +1,11 @@
 package app.webreader.data.db
 
 import androidx.room.Entity
-import androidx.room.PrimaryKey
 
-@Entity(tableName = "favorite")
+@Entity(tableName = "favorite", primaryKeys = ["siteId", "key"])
 data class Favorite(
-    @PrimaryKey val key: String,
+    val siteId: String,
+    val key: String,
     val type: String,
     val title: String,
     val addedAt: Long,

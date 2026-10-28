@@ -33,7 +33,7 @@ class LibraryViewModelTest {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         db = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), AppDatabase::class.java)
             .allowMainThreadQueries().build()
-        vm = LibraryViewModel(db.favoriteDao(), db.readHistoryDao(), UrlKeyer { config })
+        vm = LibraryViewModel(db.favoriteDao(), db.readHistoryDao(), UrlKeyer { config }) { "s" }
     }
 
     @After
@@ -51,8 +51,8 @@ class LibraryViewModelTest {
 
     @Test
     fun favoritesCanBeFilteredByType() = runTest {
-        db.favoriteDao().upsert(Favorite("/series/1", Favorite.TYPE_SERIES, "S", 1))
-        db.favoriteDao().upsert(Favorite("/ep/2", Favorite.TYPE_EPISODE, "E", 2))
+        db.favoriteDao().upsert(Favorite("s", "/series/1", Favorite.TYPE_SERIES, "S", 1))
+        db.favoriteDao().upsert(Favorite("s", "/ep/2", Favorite.TYPE_EPISODE, "E", 2))
         assertEquals(2, vm.favorites.first().size)
         assertEquals(listOf("/series/1"), vm.favoritesOfType(Favorite.TYPE_SERIES).first().map { it.key })
         assertEquals(listOf("/ep/2"), vm.favoritesOfType(Favorite.TYPE_EPISODE).first().map { it.key })
@@ -60,16 +60,16 @@ class LibraryViewModelTest {
 
     @Test
     fun removeFavoriteDeletes() = runTest {
-        db.favoriteDao().upsert(Favorite("/series/1", Favorite.TYPE_SERIES, "S", 1))
+        db.favoriteDao().upsert(Favorite("s", "/series/1", Favorite.TYPE_SERIES, "S", 1))
         vm.removeFavorite("/series/1").join()
         assertEquals(emptyList<Favorite>(), vm.favorites.first())
     }
 
     @Test
     fun recentOrderedByUpdatedAtDesc() = runTest {
-        db.readHistoryDao().upsert(ReadHistory("/ep/1", 10, 100))
-        db.readHistoryDao().upsert(ReadHistory("/ep/2", 20, 300))
-        db.readHistoryDao().upsert(ReadHistory("/ep/3", 30, 200))
+        db.readHistoryDao().upsert(ReadHistory("s", "/ep/1", 10, 100))
+        db.readHistoryDao().upsert(ReadHistory("s", "/ep/2", 20, 300))
+        db.readHistoryDao().upsert(ReadHistory("s", "/ep/3", 30, 200))
         assertEquals(listOf("/ep/2", "/ep/3", "/ep/1"), vm.recent.first().map { it.key })
     }
 }

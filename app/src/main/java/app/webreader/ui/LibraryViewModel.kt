@@ -18,18 +18,19 @@ class LibraryViewModel(
     private val favoriteDao: FavoriteDao,
     private val historyDao: ReadHistoryDao,
     private val keyer: UrlKeyer,
+    private val siteId: () -> String,
 ) : ViewModel() {
 
-    val favorites: Flow<List<Favorite>> = favoriteDao.observeAll()
+    val favorites: Flow<List<Favorite>> = favoriteDao.observeAll(siteId())
 
-    val recent: Flow<List<ReadHistory>> = historyDao.observeRecent(RECENT_LIMIT)
+    val recent: Flow<List<ReadHistory>> = historyDao.observeRecent(siteId(), RECENT_LIMIT)
 
     fun favoritesOfType(type: String): Flow<List<Favorite>> =
         favorites.map { list -> list.filter { it.type == type } }
 
     fun urlFor(key: String): String = keyer.resolve(key)
 
-    fun removeFavorite(key: String): Job = viewModelScope.launch { favoriteDao.delete(key) }
+    fun removeFavorite(key: String): Job = viewModelScope.launch { favoriteDao.delete(siteId(), key) }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -38,6 +39,7 @@ class LibraryViewModel(
                 container.database.favoriteDao(),
                 container.database.readHistoryDao(),
                 container.keyer,
+                container.currentSiteId,
             ) as T
     }
 

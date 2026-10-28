@@ -21,6 +21,7 @@ class BrowserViewModel(
     private val historyDao: ReadHistoryDao,
     private val keyer: UrlKeyer,
     private val classifier: () -> PageClassifier,
+    private val siteId: () -> String,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : ViewModel() {
 
@@ -29,18 +30,18 @@ class BrowserViewModel(
     fun onPageFinished(url: String, title: String?): Job = viewModelScope.launch {
         val key = keyer.key(url)
         if (classifier().classify(key) == PageType.OTHER) return@launch
-        val position = historyDao.get(key)?.lastPosition ?: 0
-        historyDao.upsert(ReadHistory(key, position, clock()))
+        val position = historyDao.get(siteId(), key)?.lastPosition ?: 0
+        historyDao.upsert(ReadHistory(siteId(), key, position, clock()))
     }
 
     fun savePosition(url: String, y: Int): Job = viewModelScope.launch {
         val key = keyer.key(url)
         if (classifier().classify(key) == PageType.OTHER) return@launch
-        historyDao.upsert(ReadHistory(key, y, clock()))
+        historyDao.upsert(ReadHistory(siteId(), key, y, clock()))
     }
 
     suspend fun restoreTarget(url: String): Int? =
-        historyDao.get(keyer.key(url))?.lastPosition?.takeIf { it > 0 }
+        historyDao.get(siteId(), keyer.key(url))?.lastPosition?.takeIf { it > 0 }
 
     fun toggleFavorite(url: String, title: String): Job = viewModelScope.launch {
         val key = keyer.key(url)
@@ -49,14 +50,14 @@ class BrowserViewModel(
             PageType.SERIES -> Favorite.TYPE_SERIES
             PageType.EPISODE -> Favorite.TYPE_EPISODE
         }
-        if (favoriteDao.observeIsFavorite(key).first()) {
-            favoriteDao.delete(key)
+        if (favoriteDao.observeIsFavorite(siteId(), key).first()) {
+            favoriteDao.delete(siteId(), key)
         } else {
-            favoriteDao.upsert(Favorite(key, type, title.ifBlank { key }, clock()))
+            favoriteDao.upsert(Favorite(siteId(), key, type, title.ifBlank { key }, clock()))
         }
     }
 
-    fun isFavorite(url: String): Flow<Boolean> = favoriteDao.observeIsFavorite(keyer.key(url))
+    fun isFavorite(url: String): Flow<Boolean> = favoriteDao.observeIsFavorite(siteId(), keyer.key(url))
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -66,6 +67,7 @@ class BrowserViewModel(
                 container.database.readHistoryDao(),
                 container.keyer,
                 container.classifier,
+                container.currentSiteId,
             ) as T
     }
 }
