@@ -3,6 +3,10 @@ package app.webreader.ui
 import app.webreader.data.CachedResource
 import app.webreader.data.ResourceCache
 import app.webreader.data.SettingsStore
+import app.webreader.data.SiteRepository
+import app.webreader.data.db.AppDatabase
+import app.webreader.data.db.Favorite
+import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -12,7 +16,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -30,6 +33,7 @@ class SettingsViewModelTest {
     @get:Rule val tmp = TemporaryFolder()
     private lateinit var settings: SettingsStore
     private lateinit var cache: ResourceCache
+    private lateinit var db: AppDatabase
     private lateinit var vm: SettingsViewModel
 
     @Before
@@ -37,38 +41,19 @@ class SettingsViewModelTest {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         settings = SettingsStore(RuntimeEnvironment.getApplication(), "test-" + UUID.randomUUID())
         cache = ResourceCache(tmp.newFolder(), { 10_000_000L }, { emptySet() })
-        vm = SettingsViewModel(settings, cache)
+        db = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        val repo = SiteRepository(db.siteDao(), db.favoriteDao(), db.readHistoryDao(), cache)
+        vm = SettingsViewModel(settings, cache, repo)
     }
 
     @After
-    fun tearDown() = Dispatchers.resetMain()
+    fun tearDown() {
+        db.close()
+        Dispatchers.resetMain()
+    }
 
     private fun res() = CachedResource("text/html", "utf-8", byteArrayOf(1, 2, 3))
-
-    @Test
-    fun nonHttpBaseUrlRejected() = runTest {
-        listOf("ftp://example.com", "example.com", "", "   ", "http://", "javascript:alert(1)").forEach {
-            assertTrue(it, vm.saveBaseUrl(it).isFailure)
-        }
-        assertEquals("", settings.siteConfig.first().baseUrl)
-        assertTrue(vm.saveBaseUrl("  https://example.com  ").isSuccess)
-        assertEquals("https://example.com", settings.siteConfig.first().baseUrl)
-    }
-
-    @Test
-    fun invalidRegexSurfacedAsFailure() = runTest {
-        assertTrue(vm.savePatterns("/series/\\d+", "/ep/\\d+").isSuccess)
-        assertTrue(vm.savePatterns("(", "/x").isFailure)
-        assertEquals("/series/\\d+", vm.seriesPattern.first())
-        assertEquals("/ep/\\d+", vm.episodePattern.first())
-    }
-
-    @Test
-    fun changingBaseUrlDoesNotClearCache() = runTest {
-        cache.put("/a", res())
-        assertTrue(vm.saveBaseUrl("https://new.example.org").isSuccess)
-        assertNotNull(cache.get("/a"))
-    }
 
     @Test
     fun clearCacheEmptiesIt() = runTest {
@@ -79,13 +64,7 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun aliasHostsNormalized() = runTest {
-        vm.saveAliasHosts(" M.Example.com, b.example.com\nm.example.com  ,, ")
-        assertEquals(setOf("m.example.com", "b.example.com"), settings.siteConfig.first().aliasHosts)
-    }
-
-    @Test
-    fun cacheLimitNeverBelowOne() = runTest {
+    fun cacheLimitStillGlobalAndAtLeastOne() = runTest {
         vm.saveCache(0, false)
         assertEquals(1, settings.cacheLimitMb.first())
         assertEquals(false, settings.protectFavorites.first())
@@ -94,13 +73,29 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun changingBaseAddsOldHostToAliases() = runTest {
-        assertTrue(vm.saveBaseUrl("https://Old.Example/").isSuccess)
-        assertEquals(emptySet<String>(), settings.siteConfig.first().aliasHosts)
-        settings.setAliasHosts(setOf("keep.example", "new.example"))
-        assertTrue(vm.saveBaseUrl("HTTPS://New.Example/x").isSuccess)
-        val c = settings.siteConfig.first()
-        assertEquals("https://new.example/x", c.baseUrl)
-        assertEquals(setOf("keep.example", "old.example"), c.aliasHosts)
+    fun addSiteDuplicateHostSurfacedAsFailure() = runTest {
+        assertTrue(vm.addSite("A", "https://a.example.com", "", "", "").isSuccess)
+        assertTrue(vm.addSite("B", "https://a.example.com", "", "", "").isFailure)
+        assertTrue(vm.addSite("C", "https://c.example.com", "a.example.com", "", "").isFailure)
+        assertEquals(1, vm.sites.first().size)
+    }
+
+    @Test
+    fun deleteSiteRemovesItsRecords() = runTest {
+        val site = vm.addSite("A", "https://a.example.com", "", "", "").getOrThrow()
+        db.favoriteDao().upsert(Favorite(site.id, "/series/1", Favorite.TYPE_SERIES, "S", 1))
+        cache.put("${site.id}:/a", res())
+        vm.deleteSite(site.id)
+        assertTrue(vm.sites.first().isEmpty())
+        assertTrue(db.favoriteDao().observeAll(site.id).first().isEmpty())
+        assertNull(cache.get("${site.id}:/a"))
+    }
+
+    @Test
+    fun updateSiteWorksAndRejectsBadPattern() = runTest {
+        val site = vm.addSite("A", "https://a.example.com", "", "", "").getOrThrow()
+        assertTrue(vm.updateSite(site.id, "A2", "https://a.example.com", "", "(", "").isFailure)
+        assertTrue(vm.updateSite(site.id, "A2", "https://a.example.com", "", "/s/\\d+", "").isSuccess)
+        assertEquals("A2", vm.sites.first().single().name)
     }
 }

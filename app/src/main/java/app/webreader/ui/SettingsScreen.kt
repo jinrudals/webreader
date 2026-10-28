@@ -28,21 +28,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.first
+import java.net.URI
 import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     var loaded by rememberSaveable { mutableStateOf(false) }
-    var baseUrl by rememberSaveable { mutableStateOf("") }
-    var aliases by rememberSaveable { mutableStateOf("") }
-    var series by rememberSaveable { mutableStateOf("") }
-    var episode by rememberSaveable { mutableStateOf("") }
     var limit by rememberSaveable { mutableStateOf("") }
     var protect by rememberSaveable { mutableStateOf(true) }
+    var editing by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleting by rememberSaveable { mutableStateOf<String?>(null) }
+    val sites by viewModel.sites.collectAsState(initial = emptyList())
 
-    var siteError by rememberSaveable { mutableStateOf<String?>(null) }
-    var patternError by rememberSaveable { mutableStateOf<String?>(null) }
     var cacheError by rememberSaveable { mutableStateOf<String?>(null) }
     var saved by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
@@ -50,15 +48,28 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
     // Populate once; later flow emissions must not overwrite what the user is typing.
     LaunchedEffect(Unit) {
         if (!loaded) {
-            val cfg = viewModel.siteConfig.first()
-            baseUrl = cfg.baseUrl
-            aliases = cfg.aliasHosts.sorted().joinToString(", ")
-            series = viewModel.seriesPattern.first()
-            episode = viewModel.episodePattern.first()
             limit = viewModel.cacheLimitMb.first().toString()
             protect = viewModel.protectFavorites.first()
             loaded = true
         }
+    }
+
+    val editTarget = editing
+    if (editTarget != null) {
+        val site = sites.firstOrNull { it.id == editTarget }
+        if (editTarget == NEW_SITE || site != null) {
+            SiteEditForm(
+                site = site,
+                onSave = { n, u, a, sp, ep ->
+                    if (site == null) viewModel.addSite(n, u, a, sp, ep).map { }
+                    else viewModel.updateSite(site.id, n, u, a, sp, ep)
+                },
+                onDone = { editing = null },
+                modifier = modifier.verticalScroll(rememberScrollState()).padding(16.dp),
+            )
+            return
+        }
+        editing = null
     }
 
     val sizeBytes by viewModel.cacheSizeBytes.collectAsState(initial = 0L)
@@ -67,61 +78,19 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
         modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Site")
-        OutlinedTextField(
-            value = baseUrl,
-            onValueChange = { baseUrl = it; siteError = null; saved = null },
-            label = { Text("Base URL") },
-            singleLine = true,
-            isError = siteError != null,
-            supportingText = siteError?.let { { Text(it) } },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = aliases,
-            onValueChange = { aliases = it; saved = null },
-            label = { Text("Alias hosts (comma separated)") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(onClick = {
-            scope.launch {
-                viewModel.saveBaseUrl(baseUrl).fold(
-                    onSuccess = {
-                        viewModel.saveAliasHosts(aliases)
-                        siteError = null
-                        saved = "Site saved"
-                    },
-                    onFailure = { siteError = it.message ?: "Invalid URL"; saved = null },
-                )
+        Text("Sites")
+        sites.forEach { site ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(site.name)
+                    Text(runCatching { URI(site.baseUrl).host }.getOrNull() ?: site.baseUrl)
+                }
+                TextButton(onClick = { editing = site.id }) { Text("Edit") }
+                TextButton(onClick = { deleting = site.id }) { Text("Delete") }
             }
-        }) { Text("Save site") }
-
-        Text("Page patterns (regex)")
-        OutlinedTextField(
-            value = series,
-            onValueChange = { series = it; patternError = null; saved = null },
-            label = { Text("Series pattern") },
-            singleLine = true,
-            isError = patternError != null,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = episode,
-            onValueChange = { episode = it; patternError = null; saved = null },
-            label = { Text("Episode pattern") },
-            singleLine = true,
-            isError = patternError != null,
-            supportingText = patternError?.let { { Text(it) } },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(onClick = {
-            scope.launch {
-                viewModel.savePatterns(series, episode).fold(
-                    onSuccess = { patternError = null; saved = "Patterns saved" },
-                    onFailure = { patternError = it.message ?: "Invalid regex"; saved = null },
-                )
-            }
-        }) { Text("Save patterns") }
+        }
+        if (sites.isEmpty()) Text("No sites yet")
+        Button(onClick = { editing = NEW_SITE }) { Text("Add site") }
 
         Text("Cache")
         Text("Used: %.1f MB".format(sizeBytes / (1024.0 * 1024.0)))
@@ -157,6 +126,23 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
         saved?.let { Text(it) }
     }
 
+    deleting?.let { id ->
+        val site = sites.firstOrNull { it.id == id }
+        if (site == null) {
+            deleting = null
+        } else {
+            AlertDialog(
+                onDismissRequest = { deleting = null },
+                title = { Text("Delete ${site.name}?") },
+                text = { Text("Favorites, history and cache of this site are removed.") },
+                confirmButton = {
+                    TextButton(onClick = { scope.launch { viewModel.deleteSite(id) }; deleting = null }) { Text("Delete") }
+                },
+                dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+            )
+        }
+    }
+
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
@@ -171,3 +157,5 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
         )
     }
 }
+
+private const val NEW_SITE = "\u0000new"

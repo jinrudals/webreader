@@ -44,9 +44,7 @@ class LegacyMigratorTest {
 
     @Test
     fun legacySettingsBecomeDefaultSiteAndRecordsMoved() = runTest {
-        settings.setBaseUrl("https://a.example.com")
-        settings.setAliasHosts(setOf("m.example.com"))
-        settings.setPatterns("^/series/\\d+", "^/ep/\\d+")
+        settings.seedLegacySite("https://a.example.com", setOf("m.example.com"), "^/series/\\d+", "^/ep/\\d+")
         db.favoriteDao().upsert(Favorite("", "/series/1", Favorite.TYPE_SERIES, "S", 1))
         db.readHistoryDao().upsert(ReadHistory("", "/ep/1", 7, 1))
         cache.put("/series/1", CachedResource("text/html", null, byteArrayOf(1)))
@@ -68,7 +66,7 @@ class LegacyMigratorTest {
 
     @Test
     fun runsOnlyOnce() = runTest {
-        settings.setBaseUrl("https://a.example.com")
+        settings.seedLegacySite("https://a.example.com")
         migrator.run()
         db.siteDao().delete(repo.sites.first().single().id)
         migrator.run()
@@ -85,7 +83,7 @@ class LegacyMigratorTest {
 
     @Test
     fun invalidLegacyUrlNotMarkedMigratedAndLogged() = runTest {
-        settings.setBaseUrl("not a url")
+        settings.seedLegacySite("not a url")
         db.favoriteDao().upsert(Favorite("", "/series/1", Favorite.TYPE_SERIES, "S", 1))
 
         migrator.run()
@@ -94,7 +92,7 @@ class LegacyMigratorTest {
         assertTrue(repo.sites.first().isEmpty())
         assertTrue(org.robolectric.shadows.ShadowLog.getLogsForTag("LegacyMigrator").isNotEmpty())
 
-        settings.setBaseUrl("https://a.example.com")
+        settings.seedLegacySite("https://a.example.com")
         migrator.run()
         val site = repo.sites.first().single()
         assertEquals(1, db.favoriteDao().observeAll(site.id).first().size)
@@ -103,7 +101,7 @@ class LegacyMigratorTest {
 
     @Test
     fun rerunAfterPartialFailureReusesExistingSiteAndReassigns() = runTest {
-        settings.setBaseUrl("https://a.example.com")
+        settings.seedLegacySite("https://a.example.com")
         val existing = repo.add("Default", "https://a.example.com", "", "", "").getOrThrow()
         db.favoriteDao().upsert(Favorite("", "/series/1", Favorite.TYPE_SERIES, "S", 1))
         db.readHistoryDao().upsert(ReadHistory("", "/ep/1", 7, 1))
