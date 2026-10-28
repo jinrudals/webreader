@@ -19,6 +19,7 @@ class SiteRepository(
     private val favoriteDao: FavoriteDao,
     private val historyDao: ReadHistoryDao,
     private val cache: ResourceCache,
+    private val inTransaction: suspend (suspend () -> Unit) -> Unit = { it() },
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     private val mutex = Mutex()
@@ -53,9 +54,11 @@ class SiteRepository(
     }
 
     suspend fun delete(id: String) = mutex.withLock {
-        siteDao.delete(id)
-        favoriteDao.deleteForSite(id)
-        historyDao.deleteForSite(id)
+        inTransaction {
+            siteDao.delete(id)
+            favoriteDao.deleteForSite(id)
+            historyDao.deleteForSite(id)
+        }
         cache.removePrefix("$id:")
     }
 

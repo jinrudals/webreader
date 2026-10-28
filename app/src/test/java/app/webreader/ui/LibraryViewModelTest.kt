@@ -72,6 +72,15 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun blankCurrentSiteShowsNothing() = runTest {
+        db.favoriteDao().upsert(Favorite("", "/series/1", Favorite.TYPE_SERIES, "legacy", 1))
+        db.readHistoryDao().upsert(ReadHistory("", "/ep/1", 1, 1))
+        currentId.value = ""
+        assertEquals(emptyList<Favorite>(), vm.favorites.first())
+        assertEquals(emptyList<ReadHistory>(), vm.recent.first())
+    }
+
+    @Test
     fun favoritesCanBeFilteredByType() = runTest {
         db.favoriteDao().upsert(Favorite("s", "/series/1", Favorite.TYPE_SERIES, "S", 1))
         db.favoriteDao().upsert(Favorite("s", "/ep/2", Favorite.TYPE_EPISODE, "E", 2))

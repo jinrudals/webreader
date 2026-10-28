@@ -43,7 +43,7 @@ class SettingsViewModel(
         id: String, name: String, baseUrl: String, aliases: String, series: String, episode: String,
     ): Result<Unit> = siteRepository.update(id, name, baseUrl, aliases, series, episode)
 
-    suspend fun deleteSite(id: String) = siteRepository.delete(id)
+    fun deleteSite(id: String): Job = viewModelScope.launch { siteRepository.delete(id) }
 
     suspend fun saveCache(limitMb: Int, protectFavorites: Boolean) {
         settings.setCacheLimitMb(limitMb.coerceAtLeast(1))

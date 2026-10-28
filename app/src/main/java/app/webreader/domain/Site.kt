@@ -10,8 +10,6 @@ data class Site(
     val seriesPattern: String,
     val episodePattern: String,
 ) {
-    val config: SiteConfig get() = SiteConfig(baseUrl, aliasHosts)
-
     fun classifier(): PageClassifier = PageClassifier(seriesPattern, episodePattern)
 
     fun hosts(): Set<String> {

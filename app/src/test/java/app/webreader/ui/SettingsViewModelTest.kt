@@ -6,6 +6,8 @@ import app.webreader.data.SettingsStore
 import app.webreader.data.SiteRepository
 import app.webreader.data.db.AppDatabase
 import app.webreader.data.db.Favorite
+import app.webreader.data.db.ReadHistory
+import app.webreader.domain.SiteRegistry
 import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -83,11 +85,19 @@ class SettingsViewModelTest {
     @Test
     fun deleteSiteRemovesItsRecords() = runTest {
         val site = vm.addSite("A", "https://a.example.com", "", "", "").getOrThrow()
-        db.favoriteDao().upsert(Favorite(site.id, "/series/1", Favorite.TYPE_SERIES, "S", 1))
+        val other = vm.addSite("B", "https://b.example.com", "", "", "").getOrThrow()
+        for (s in listOf(site, other)) {
+            db.favoriteDao().upsert(Favorite(s.id, "/series/1", Favorite.TYPE_SERIES, "S", 1))
+            db.readHistoryDao().upsert(ReadHistory(s.id, "/ep/1", 1, 1))
+        }
         cache.put("${site.id}:/a", res())
-        vm.deleteSite(site.id)
-        assertTrue(vm.sites.first().isEmpty())
+        vm.deleteSite(site.id).join()
+        assertEquals(listOf(other.id), vm.sites.first().map { it.id })
+        assertEquals(other.id, SiteRegistry.resolveCurrent(vm.sites.first(), site.id)?.id)
         assertTrue(db.favoriteDao().observeAll(site.id).first().isEmpty())
+        assertTrue(db.readHistoryDao().observeRecent(site.id, 10).first().isEmpty())
+        assertEquals(1, db.favoriteDao().observeAll(other.id).first().size)
+        assertEquals(1, db.readHistoryDao().observeRecent(other.id, 10).first().size)
         assertNull(cache.get("${site.id}:/a"))
     }
 

@@ -44,7 +44,4 @@ interface SiteDao {
 
     @Query("DELETE FROM site WHERE id = :id")
     suspend fun delete(id: String)
-
-    @Query("SELECT COUNT(*) FROM site")
-    suspend fun count(): Int
 }

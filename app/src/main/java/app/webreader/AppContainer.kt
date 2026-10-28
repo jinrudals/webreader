@@ -1,6 +1,7 @@
 package app.webreader
 
 import android.content.Context
+import androidx.room.withTransaction
 import app.webreader.data.ResourceCache
 import app.webreader.data.LegacyMigrator
 import app.webreader.data.SettingsStore
@@ -49,6 +50,7 @@ class AppContainer(context: Context) {
 
     val siteRepository = SiteRepository(
         database.siteDao(), database.favoriteDao(), database.readHistoryDao(), resourceCache,
+        inTransaction = { block -> database.withTransaction { block() } },
     )
 
     init {

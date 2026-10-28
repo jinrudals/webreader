@@ -141,7 +141,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
                 title = { Text("Delete ${site.name}?") },
                 text = { Text("Favorites, history and cache of this site are removed.") },
                 confirmButton = {
-                    TextButton(onClick = { scope.launch { viewModel.deleteSite(id) }; deleting = null }) { Text("Delete") }
+                    TextButton(onClick = { viewModel.deleteSite(id); deleting = null }) { Text("Delete") }
                 },
                 dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
             )

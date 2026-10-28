@@ -15,6 +15,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -27,9 +28,11 @@ class LibraryViewModel(
     private val currentSiteId: StateFlow<String>,
 ) : ViewModel() {
 
-    val favorites: Flow<List<Favorite>> = currentSiteId.flatMapLatest { favoriteDao.observeAll(it) }
+    val favorites: Flow<List<Favorite>> = currentSiteId.flatMapLatest { if (it.isBlank()) flowOf(emptyList()) else favoriteDao.observeAll(it) }
 
-    val recent: Flow<List<ReadHistory>> = currentSiteId.flatMapLatest { historyDao.observeRecent(it, RECENT_LIMIT) }
+    val recent: Flow<List<ReadHistory>> = currentSiteId.flatMapLatest {
+        if (it.isBlank()) flowOf(emptyList()) else historyDao.observeRecent(it, RECENT_LIMIT)
+    }
 
     fun favoritesOfType(type: String): Flow<List<Favorite>> =
         favorites.map { list -> list.filter { it.type == type } }
