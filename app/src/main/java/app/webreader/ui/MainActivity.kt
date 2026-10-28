@@ -62,7 +62,10 @@ class MainActivity : ComponentActivity() {
                             val lib: LibraryViewModel = viewModel(factory = LibraryViewModel.Factory(container))
                             LibraryScreen(lib, onOpen = ::openInBrowser, modifier = mod)
                         }
-                        Destination.Settings -> Text("Settings", mod)
+                        Destination.Settings -> {
+                            val sv: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory(container))
+                            SettingsScreen(sv, modifier = mod)
+                        }
                         Destination.Browser -> Unit
                     }
                 }
