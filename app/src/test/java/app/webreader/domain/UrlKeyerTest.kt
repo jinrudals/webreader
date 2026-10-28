@@ -4,8 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class UrlKeyerTest {
-    private fun keyer(base: String = "https://a.com") =
-        UrlKeyer { SiteConfig(base, emptySet()) }
+    private fun keyer() = UrlKeyer()
 
     @Test
     fun sameKeyAcrossHosts() {
@@ -27,8 +26,8 @@ class UrlKeyerTest {
     }
 
     @Test
-    fun resolveUsesCurrentBase() {
-        assertEquals("https://new.com/ep/1", keyer("https://new.com").resolve("/ep/1"))
+    fun resolveUsesGivenBase() {
+        assertEquals("https://new.com/ep/1", keyer().resolve("https://new.com", "/ep/1"))
     }
 
     @Test
@@ -48,6 +47,6 @@ class UrlKeyerTest {
 
     @Test
     fun resolvePrefixesSlash() {
-        assertEquals("https://a.com/ep/1", keyer().resolve("ep/1"))
+        assertEquals("https://a.com/ep/1", keyer().resolve("https://a.com/", "ep/1"))
     }
 }

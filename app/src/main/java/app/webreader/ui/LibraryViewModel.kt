@@ -8,6 +8,8 @@ import app.webreader.data.db.Favorite
 import app.webreader.data.db.FavoriteDao
 import app.webreader.data.db.ReadHistory
 import app.webreader.data.db.ReadHistoryDao
+import app.webreader.domain.SiteConfig
+import app.webreader.domain.SiteRegistry
 import app.webreader.domain.UrlKeyer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -18,6 +20,8 @@ class LibraryViewModel(
     private val favoriteDao: FavoriteDao,
     private val historyDao: ReadHistoryDao,
     private val keyer: UrlKeyer,
+    private val registry: () -> SiteRegistry,
+    private val siteConfig: () -> SiteConfig,
     private val siteId: () -> String,
 ) : ViewModel() {
 
@@ -28,7 +32,7 @@ class LibraryViewModel(
     fun favoritesOfType(type: String): Flow<List<Favorite>> =
         favorites.map { list -> list.filter { it.type == type } }
 
-    fun urlFor(key: String): String = keyer.resolve(key)
+    fun urlFor(key: String): String = keyer.resolve(registry().byId(siteId())?.baseUrl ?: siteConfig().baseUrl, key)
 
     fun removeFavorite(key: String): Job = viewModelScope.launch { favoriteDao.delete(siteId(), key) }
 
@@ -39,6 +43,8 @@ class LibraryViewModel(
                 container.database.favoriteDao(),
                 container.database.readHistoryDao(),
                 container.keyer,
+                container.registrySnapshot,
+                container.siteConfig,
                 container.currentSiteId,
             ) as T
     }

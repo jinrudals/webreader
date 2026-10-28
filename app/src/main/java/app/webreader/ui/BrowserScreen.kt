@@ -68,7 +68,7 @@ fun BrowserScreen(
 
     val client = remember {
         CachingWebViewClient(
-            container.keyer, container.resourceCache, container.http, container.siteConfig,
+            container.keyer, container.registrySnapshot, container.resourceCache, container.http,
             onPageStarted = { started -> tracker.onPageStarted(started) },
         ) { finished ->
             val wv = webView[0]

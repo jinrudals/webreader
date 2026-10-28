@@ -5,6 +5,8 @@ import app.webreader.data.db.AppDatabase
 import app.webreader.data.db.Favorite
 import app.webreader.data.db.ReadHistory
 import app.webreader.domain.SiteConfig
+import app.webreader.domain.Site
+import app.webreader.domain.SiteRegistry
 import app.webreader.domain.UrlKeyer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -26,14 +28,15 @@ import org.robolectric.RuntimeEnvironment
 class LibraryViewModelTest {
     private lateinit var db: AppDatabase
     private lateinit var vm: LibraryViewModel
-    @Volatile private var config = SiteConfig("https://a.example.com", emptySet())
+    @Volatile private var config = SiteConfig("https://legacy.example.com", emptySet())
+    @Volatile private var registry = SiteRegistry(listOf(Site("s", "S", "https://a.example.com", emptySet(), "", "")))
 
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         db = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), AppDatabase::class.java)
             .allowMainThreadQueries().build()
-        vm = LibraryViewModel(db.favoriteDao(), db.readHistoryDao(), UrlKeyer { config }) { "s" }
+        vm = LibraryViewModel(db.favoriteDao(), db.readHistoryDao(), UrlKeyer(), { registry }, { config }) { "s" }
     }
 
     @After
@@ -45,8 +48,10 @@ class LibraryViewModelTest {
     @Test
     fun urlForUsesCurrentBase() {
         assertEquals("https://a.example.com/series/5", vm.urlFor("/series/5"))
-        config = SiteConfig("https://b.example.org", emptySet())
+        registry = SiteRegistry(listOf(Site("s", "S", "https://b.example.org", emptySet(), "", "")))
         assertEquals("https://b.example.org/series/5", vm.urlFor("/series/5"))
+        registry = SiteRegistry(emptyList())
+        assertEquals("https://legacy.example.com/series/5", vm.urlFor("/series/5"))
     }
 
     @Test

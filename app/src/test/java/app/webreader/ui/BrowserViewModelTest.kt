@@ -39,7 +39,7 @@ class BrowserViewModelTest {
             .allowMainThreadQueries().build()
         val classifier = PageClassifier("^/series/\\d+", "^/ep/\\d+")
         vm = BrowserViewModel(
-            db.favoriteDao(), db.readHistoryDao(), UrlKeyer { config }, { classifier }, { "s" }, { now },
+            db.favoriteDao(), db.readHistoryDao(), UrlKeyer(), { classifier }, { "s" }, { now },
         )
     }
 

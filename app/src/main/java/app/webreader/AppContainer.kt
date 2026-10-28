@@ -95,7 +95,7 @@ class AppContainer(context: Context) {
 
     val siteConfig: () -> SiteConfig = { siteConfigSnapshot }
     val classifier: () -> PageClassifier = { classifierSnapshot }
-    val keyer = UrlKeyer(siteConfig)
+    val keyer = UrlKeyer()
 
     init {
         protectedKeys = initialProtectedKeys
