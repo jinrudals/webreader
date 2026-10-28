@@ -196,6 +196,15 @@ class CachingWebViewClientTest {
     }
 
     @Test
+    fun onPageStartedForwards() {
+        var started: String? = null
+        val c = CachingWebViewClient(UrlKeyer { config }, cache, OkHttpClient(), { config }, onPageStarted = { started = it }) {}
+        c.onPageStarted(null, "http://x/z", null)
+        assertEquals("http://x/z", started)
+        c.onPageStarted(null, null, null)
+    }
+
+    @Test
     fun onPageFinishedForwards() {
         client.onPageFinished(null, "http://x/y")
         assertTrue(finished == "http://x/y")

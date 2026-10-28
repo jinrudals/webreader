@@ -10,6 +10,9 @@ import app.webreader.domain.UrlKeyer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
@@ -27,10 +30,22 @@ class AppContainer(context: Context) {
     val settings = SettingsStore(appContext)
     val http: OkHttpClient = OkHttpClient()
 
-    @Volatile private var siteConfigSnapshot: SiteConfig = runBlocking { settings.siteConfig.first() }
+    private val initialSiteConfig: SiteConfig = runBlocking { settings.siteConfig.first() }
+    private val initialClassifier: PageClassifier =
+        runBlocking { PageClassifier(settings.seriesPattern.first(), settings.episodePattern.first()) }
+    private val initialProtectedKeys: Set<String> = runBlocking { currentProtectedKeys() }
+
+    private val _siteConfigFlow = MutableStateFlow(initialSiteConfig)
+    private val _classifierFlow = MutableStateFlow(initialClassifier)
+
+    /** Observable site config for UI; the request path uses [siteConfig]. */
+    val siteConfigFlow: StateFlow<SiteConfig> = _siteConfigFlow.asStateFlow()
+    val classifierFlow: StateFlow<PageClassifier> = _classifierFlow.asStateFlow()
+
+    @Volatile private var siteConfigSnapshot: SiteConfig = initialSiteConfig
     @Volatile private var cacheLimitBytes: Long = 0L
-    @Volatile private var protectedKeys: Set<String> = emptySet()
-    @Volatile private var classifierSnapshot: PageClassifier = PageClassifier("", "")
+    @Volatile private var protectedKeys: Set<String> = initialProtectedKeys
+    @Volatile private var classifierSnapshot: PageClassifier = initialClassifier
 
     val siteConfig: () -> SiteConfig = { siteConfigSnapshot }
     val classifier: () -> PageClassifier = { classifierSnapshot }
@@ -44,14 +59,20 @@ class AppContainer(context: Context) {
 
     init {
         cacheLimitBytes = (runBlocking { settings.cacheLimitMb.first() }.toLong() * MB).coerceAtLeast(0)
-        settings.siteConfig.onEach { siteConfigSnapshot = it }.launchIn(appScope)
+        settings.siteConfig.onEach { siteConfigSnapshot = it; _siteConfigFlow.value = it }.launchIn(appScope)
         settings.cacheLimitMb.onEach { cacheLimitBytes = (it.toLong() * MB).coerceAtLeast(0) }.launchIn(appScope)
         combine(settings.seriesPattern, settings.episodePattern) { s, e -> PageClassifier(s, e) }
-            .onEach { classifierSnapshot = it }.launchIn(appScope)
+            .onEach { classifierSnapshot = it; _classifierFlow.value = it }.launchIn(appScope)
         combine(settings.protectFavorites, database.favoriteDao().observeAll()) { protect, favs ->
-            if (protect) favs.mapTo(HashSet()) { it.key } else emptySet()
+            protectedSet(protect, favs.map { it.key })
         }.onEach { protectedKeys = it }.launchIn(appScope)
     }
+
+    private suspend fun currentProtectedKeys(): Set<String> =
+        protectedSet(settings.protectFavorites.first(), database.favoriteDao().observeAll().first().map { it.key })
+
+    private fun protectedSet(protect: Boolean, keys: List<String>): Set<String> =
+        if (protect) keys.toHashSet() else emptySet()
 
     private companion object {
         const val MB = 1024L * 1024

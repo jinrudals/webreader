@@ -1,5 +1,6 @@
 package app.webreader.web
 
+import android.graphics.Bitmap
 import android.util.Log
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -29,6 +30,7 @@ class CachingWebViewClient(
     private val http: OkHttpClient,
     private val config: () -> SiteConfig,
     private val maxCacheableBytes: Long = MAX_CACHEABLE_BYTES,
+    private val onPageStarted: (url: String) -> Unit = {},
     private val onPageFinished: (url: String) -> Unit,
 ) : WebViewClient() {
 
@@ -39,6 +41,11 @@ class CachingWebViewClient(
             Log.w(TAG, "intercept failed", e)
             null
         }
+
+    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+        super.onPageStarted(view, url, favicon)
+        if (url != null) onPageStarted.invoke(url)
+    }
 
     override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)

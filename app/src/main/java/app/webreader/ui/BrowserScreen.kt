@@ -44,7 +44,9 @@ fun BrowserScreen(
     visible: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val baseUrl = container.siteConfig().baseUrl
+    val siteConfig by container.siteConfigFlow.collectAsState()
+    val pageClassifier by container.classifierFlow.collectAsState()
+    val baseUrl = siteConfig.baseUrl
     if (baseUrl.isBlank()) {
         if (visible) Box(modifier.fillMaxSize(), Alignment.Center) { Text("Set the site URL in Settings") }
         return
@@ -58,34 +60,29 @@ fun BrowserScreen(
     val webView = remember { arrayOfNulls<WebView>(1) }
     val density = context.resources.displayMetrics.density
 
-    fun saveCurrent() {
-        val wv = webView[0] ?: return
-        val u = wv.url ?: return
-        viewModel.savePosition(u, wv.scrollY)
-    }
-
-    // Last scroll seen for a page, flushed once the WebView moves on to a different URL.
-    var lastScroll by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    val tracker = remember { ScrollTracker { u, y -> viewModel.savePosition(u, y) } }
 
     val client = remember {
-        CachingWebViewClient(container.keyer, container.resourceCache, container.http, container.siteConfig) { finished ->
+        CachingWebViewClient(
+            container.keyer, container.resourceCache, container.http, container.siteConfig,
+            onPageStarted = { started -> tracker.onPageStarted(started) },
+        ) { finished ->
             val wv = webView[0]
-            lastScroll?.let { (u, y) -> if (u != finished) viewModel.savePosition(u, y) }
-            lastScroll = null
             currentUrl = finished
             title = wv?.title.orEmpty()
             canGoBack = wv?.canGoBack() == true
             viewModel.onPageFinished(finished, wv?.title)
             scope.launch {
-                val y = viewModel.restoreTarget(finished) ?: return@launch
-                wv?.evaluateJavascript("window.scrollTo(0,${y / density})", null)
+                val y = viewModel.restoreTarget(finished)
+                tracker.onPageFinished(finished, y ?: 0)
+                if (y != null) wv?.evaluateJavascript("window.scrollTo(0,${y / density})", null)
             }
         }
     }
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_PAUSE) saveCurrent() }
+        val observer = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_PAUSE) tracker.onPause() }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
@@ -97,7 +94,7 @@ fun BrowserScreen(
     BackHandler(enabled = visible && canGoBack) { webView[0]?.goBack() }
 
     val favorite by remember(currentUrl) { viewModel.isFavorite(currentUrl) }.collectAsState(false)
-    val favoritable = viewModel.pageType(currentUrl) != PageType.OTHER
+    val favoritable = pageClassifier.classify(container.keyer.key(currentUrl)) != PageType.OTHER
 
     Column(if (visible) modifier.fillMaxSize() else Modifier.size(0.dp)) {
         if (visible) {
@@ -122,14 +119,14 @@ fun BrowserScreen(
                     settings.allowFileAccess = false
                     settings.allowContentAccess = false
                     webViewClient = client
-                    setOnScrollChangeListener { v, _, y, _, _ -> (v as WebView).url?.let { lastScroll = it to y } }
+                    setOnScrollChangeListener { _, _, y, _, _ -> tracker.onScroll(y) }
                     webView[0] = this
+                    tag = currentUrl
                     loadUrl(currentUrl)
                 }
             },
             update = { wv ->
                 if (url != null && url != wv.tag) {
-                    saveCurrent()
                     wv.tag = url
                     wv.loadUrl(url)
                 }
