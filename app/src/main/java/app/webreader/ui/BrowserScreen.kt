@@ -4,11 +4,12 @@ import android.annotation.SuppressLint
 import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -44,21 +45,29 @@ fun BrowserScreen(
     request: OpenRequest?,
     viewModel: BrowserViewModel,
     container: AppContainer,
+    onAddSite: () -> Unit,
     visible: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val siteConfig by container.siteConfigFlow.collectAsState()
-    val pageClassifier by container.classifierFlow.collectAsState()
-    val baseUrl = siteConfig.baseUrl
-    if (baseUrl.isBlank()) {
-        if (visible) Box(modifier.fillMaxSize(), Alignment.Center) { Text("Set the site URL in Settings") }
+    val sites by container.registry.collectAsState()
+    val site by container.currentSite.collectAsState()
+    val current = site
+    if (current == null) {
+        if (visible) {
+            Column(modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) {
+                Text("Add a site to start reading")
+                Button(onClick = onAddSite) { Text("Add a site") }
+            }
+        }
         return
     }
+    val baseUrl = current.baseUrl
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var currentUrl by remember { mutableStateOf(request?.url ?: baseUrl) }
     var handledRequestId by remember { mutableStateOf(request?.id) }
+    var loadedSiteId by remember { mutableStateOf(request?.let { sites.forUrl(it.url)?.id } ?: current.id) }
     var title by remember { mutableStateOf("") }
     var canGoBack by remember { mutableStateOf(false) }
     val webView = remember { arrayOfNulls<WebView>(1) }
@@ -98,13 +107,14 @@ fun BrowserScreen(
     BackHandler(enabled = visible && canGoBack) { webView[0]?.goBack() }
 
     val favorite by remember(currentUrl) { viewModel.isFavorite(currentUrl) }.collectAsState(false)
-    val favoritable = pageClassifier.classify(container.keyer.key(currentUrl)) != PageType.OTHER
+    val favoritable = viewModel.pageType(currentUrl) != PageType.OTHER
 
     Column(if (visible) modifier.fillMaxSize() else Modifier.size(0.dp)) {
         if (visible) {
             TopAppBar(
                 title = { Text(title.ifBlank { "WebReader" }, maxLines = 1) },
                 actions = {
+                    SiteSelector(sites.sites, current) { id -> scope.launch { container.selectSite(id) } }
                     IconButton(onClick = { viewModel.toggleFavorite(currentUrl, title) }, enabled = favoritable) {
                         Text(if (favorite) "★" else "☆")
                     }
@@ -131,7 +141,11 @@ fun BrowserScreen(
             update = { wv ->
                 if (request != null && request.id != handledRequestId) {
                     handledRequestId = request.id
+                    loadedSiteId = sites.forUrl(request.url)?.id ?: current.id
                     wv.loadUrl(request.url)
+                } else if (current.id != loadedSiteId) {
+                    loadedSiteId = current.id
+                    wv.loadUrl(baseUrl)
                 }
             },
         )

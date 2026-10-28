@@ -4,12 +4,12 @@ import androidx.room.Room
 import app.webreader.data.db.AppDatabase
 import app.webreader.data.db.Favorite
 import app.webreader.data.db.ReadHistory
-import app.webreader.domain.SiteConfig
 import app.webreader.domain.Site
 import app.webreader.domain.SiteRegistry
 import app.webreader.domain.UrlKeyer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -28,15 +28,20 @@ import org.robolectric.RuntimeEnvironment
 class LibraryViewModelTest {
     private lateinit var db: AppDatabase
     private lateinit var vm: LibraryViewModel
-    @Volatile private var config = SiteConfig("https://legacy.example.com", emptySet())
-    @Volatile private var registry = SiteRegistry(listOf(Site("s", "S", "https://a.example.com", emptySet(), "", "")))
+    private val currentId = MutableStateFlow("s")
+    @Volatile private var registry = SiteRegistry(
+        listOf(
+            Site("s", "S", "https://a.example.com", emptySet(), "", ""),
+            Site("t", "T", "https://b.example.org", emptySet(), "", ""),
+        ),
+    )
 
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         db = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), AppDatabase::class.java)
             .allowMainThreadQueries().build()
-        vm = LibraryViewModel(db.favoriteDao(), db.readHistoryDao(), UrlKeyer(), { registry }, { config }) { "s" }
+        vm = LibraryViewModel(db.favoriteDao(), db.readHistoryDao(), UrlKeyer(), { registry }, currentId)
     }
 
     @After
@@ -46,12 +51,24 @@ class LibraryViewModelTest {
     }
 
     @Test
-    fun urlForUsesCurrentBase() {
+    fun urlForUsesCurrentSiteBase() {
         assertEquals("https://a.example.com/series/5", vm.urlFor("/series/5"))
-        registry = SiteRegistry(listOf(Site("s", "S", "https://b.example.org", emptySet(), "", "")))
+        currentId.value = "t"
         assertEquals("https://b.example.org/series/5", vm.urlFor("/series/5"))
-        registry = SiteRegistry(emptyList())
-        assertEquals("https://legacy.example.com/series/5", vm.urlFor("/series/5"))
+    }
+
+    @Test
+    fun libraryFollowsCurrentSite() = runTest {
+        db.favoriteDao().upsert(Favorite("s", "/series/1", Favorite.TYPE_SERIES, "S", 1))
+        db.favoriteDao().upsert(Favorite("t", "/series/9", Favorite.TYPE_SERIES, "T", 2))
+        db.readHistoryDao().upsert(ReadHistory("s", "/ep/1", 10, 100))
+        db.readHistoryDao().upsert(ReadHistory("t", "/ep/9", 10, 100))
+        assertEquals(listOf("/series/1"), vm.favorites.first().map { it.key })
+        assertEquals(listOf("/ep/1"), vm.recent.first().map { it.key })
+        currentId.value = "t"
+        assertEquals(listOf("/series/9"), vm.favorites.first().map { it.key })
+        assertEquals(listOf("/series/9"), vm.favoritesOfType(Favorite.TYPE_SERIES).first().map { it.key })
+        assertEquals(listOf("/ep/9"), vm.recent.first().map { it.key })
     }
 
     @Test

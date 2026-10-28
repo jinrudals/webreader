@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -16,6 +17,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.webreader.data.db.Favorite
+import app.webreader.domain.Site
 
 private enum class TypeFilter(val label: String, val type: String?) {
     All("All", null),
@@ -35,19 +38,28 @@ private enum class TypeFilter(val label: String, val type: String?) {
     Episodes("Episodes", Favorite.TYPE_EPISODE),
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     viewModel: LibraryViewModel,
-    onOpen: (String) -> Unit,
+    sites: List<Site>,
+    current: Site?,
+    onSelectSite: (String) -> Unit,
+    onOpen: (siteId: String, url: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    val openCurrent: (String) -> Unit = { url -> current?.let { onOpen(it.id, url) } }
     Column(modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text("Library") },
+            actions = { SiteSelector(sites, current, onSelectSite) },
+        )
         TabRow(selectedTabIndex = tab) {
             Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Favorites") })
             Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Recent") })
         }
-        if (tab == 0) FavoritesTab(viewModel, onOpen) else RecentTab(viewModel, onOpen)
+        if (tab == 0) FavoritesTab(viewModel, openCurrent) else RecentTab(viewModel, openCurrent)
     }
 }
 
